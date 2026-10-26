@@ -14,11 +14,22 @@ export function clip(value, max) {
 
 export function normalizeAnswer(value) {
   return String(value ?? "")
+    .normalize("NFKC")
     .toLowerCase()
-    .replace(/[’‘]/g, "'")
-    .replace(/[^a-z0-9'\s]/g, " ")
+    .replace(/[\u2018\u2019\u201a\u201b\u2032`´]/g, "'")
+    .replace(/[\u201c\u201d\u201e\u201f\u00ab\u00bb]/g, '"')
+    .replace(/[^\p{L}\p{N}\s]+/gu, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function contentKey(parts) {
+  const text = (parts || []).map((part) => normalizeAnswer(part)).join("|");
+  let hash = 5381;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) + hash) ^ text.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 export function songKey(title, artist) {

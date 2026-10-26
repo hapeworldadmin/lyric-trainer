@@ -1,5 +1,5 @@
-import { songStats } from "./progress.js?v=6";
-import { clip, normalizeAnswer, safeConcertId, slug, songKey, songsMatch } from "./text.js?v=6";
+import { songStats } from "./progress.js?v=7";
+import { clip, normalizeAnswer, safeConcertId, slug, songKey, songsMatch } from "./text.js?v=7";
 
 export function normalizeConcerts(data) {
   const list = Array.isArray(data) ? data : data?.concerts;
@@ -12,6 +12,7 @@ export function normalizeConcerts(data) {
     const label = typeof raw.label === "string" ? clip(raw.label, 80) : "";
     const sourceText = typeof raw.source === "string" ? raw.source.trim() : "";
     const source = /^https:\/\/\S+$/.test(sourceText) ? clip(sourceText, 300) : "";
+    const accent = /^#[0-9a-fA-F]{6}$/.test(raw.accent || "") ? raw.accent.toUpperCase() : "";
     let id = "";
     try {
       id = safeConcertId(raw.id || slug(name));
@@ -30,7 +31,7 @@ export function normalizeConcerts(data) {
         setlist.push({ title, artist });
       }
     }
-    concerts.push({ id, name, label, source, setlist });
+    concerts.push({ id, name, label, source, accent, setlist });
   }
   return concerts;
 }
@@ -54,7 +55,7 @@ export function linkSetlist(concert, songs, progress) {
     const key = songKey(item.title, item.artist);
     const song = bestSongMatch(songs, item.title, item.artist);
     const stats = song ? songStats(progress || { songs: {} }, song) : null;
-    const mastered = Boolean(stats && stats.lineCount > 0 && stats.linesMastered >= stats.lineCount);
+    const mastered = Boolean(stats?.songMastered);
     return {
       index,
       title: item.title,
@@ -127,6 +128,12 @@ export function leaderboardFromSongScores(songScores, setlist) {
   }
   rows.sort((a, b) => b.score - a.score || b.played - a.played || a.playerName.localeCompare(b.playerName));
   return rows;
+}
+
+export function concertStatusLine(summary) {
+  if (!summary?.total) return "No setlist posted yet";
+  if (!summary.ready && !summary.mastered) return "Add lyrics to your first song";
+  return `${summary.mastered}/${summary.total} mastered`;
 }
 
 export function activeConcertSummary(concert, songs, progress) {

@@ -1,34 +1,41 @@
-import { blip } from "./audio.js?v=6";
-import { readClipboardFromGesture } from "./clipboard.js?v=6";
-import { activeConcertSummary, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=6";
+import { blip } from "./audio.js?v=7";
+import { readClipboardFromGesture } from "./clipboard.js?v=7";
+import { activeConcertSummary, concertStatusLine, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=7";
 import {
-  CONCERT_SECONDS,
   GAMES,
   answersMatch,
   buildLesson,
+  chapterPlan,
+  correctLine,
+  gradeAnswer,
   firstLessonId,
   gameAvailability,
-  isOrderCorrect,
   judgeOrderTap,
   lessonBonus,
-  pointsFor
-} from "./games.js?v=6";
-import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=6";
+  nextPractice,
+  pointsFor,
+  questionSeconds,
+  sectionProgress
+} from "./games.js?v=7";
+import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=7";
 import {
   addBonusXp,
   buildExport,
   emptyProgress,
   finishStreak,
   mergeImport,
+  markChapter,
+  masteredRoundIds,
   recordLineResult,
+  recordRoundResult,
   recordRun,
   resetLineMasteryIfChanged,
   retitleSongProgress,
   songStats
-} from "./progress.js?v=6";
-import { SAMPLE_SONG } from "./sample.js?v=6";
-import { createScoreProvider, sanitizeRun } from "./scores.js?v=6";
-import { drawShareCard, shareText } from "./share.js?v=6";
+} from "./progress.js?v=7";
+import { SAMPLE_SONG } from "./sample.js?v=7";
+import { createScoreProvider, sanitizeRun } from "./scores.js?v=7";
+import { drawShareCard, shareText } from "./share.js?v=7";
 import {
   activePlayer,
   activeProgress as progressOf,
@@ -37,8 +44,8 @@ import {
   sampleRecord,
   saveState,
   seedSample
-} from "./storage.js?v=6";
-import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=6";
+} from "./storage.js?v=7";
+import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=7";
 
 const session = {
   state: null,
@@ -111,7 +118,9 @@ async function boot() {
   }
   window.addEventListener("hashchange", sync);
   document.addEventListener("click", onClick);
+  document.addEventListener("keydown", onKeyDown);
   document.addEventListener("paste", onSheetPaste);
+  watchNetlifyBadge();
   document.addEventListener("input", onInput);
   document.addEventListener("submit", onSubmit);
   document.addEventListener("change", onChange);
@@ -206,11 +215,25 @@ function shellAccent() {
   return session.concerts[0] ? accentForId(session.concerts[0].id) : "violet";
 }
 
+function accentStyle(concert) {
+  const hex = concert?.accent || "";
+  if (!/^#[0-9A-F]{6}$/.test(hex)) return "";
+  const value = parseInt(hex.slice(1), 16);
+  const channel = (shift) => Math.round(((value >> shift) & 255) * 0.55).toString(16).padStart(2, "0");
+  const mid = `#${channel(16)}${channel(8)}${channel(0)}`;
+  return `--accent:${hex};--hero-mid:${mid};--glow:${hex}73;--on-accent:#0b0b0f`;
+}
+
 function shell(body, { play }) {
   const tone = toneFor(session.route.name);
   const tabs = !play && session.route.name !== "results";
+  const route = session.route;
+  const song = findSong(route.songId || session.play?.songId || session.results?.songId);
+  const concert = route.name === "concert"
+    ? session.concerts.find((item) => item.id === route.concertId)
+    : (song ? concertsForSong(session.concerts, song.title, song.artist)[0] : session.concerts[0]);
   return `
-    <div class="app tone-${tone} accent-${shellAccent()} ${play ? "is-play" : ""} ${tabs ? "has-tabs" : ""}">
+    <div class="app tone-${tone} accent-${shellAccent()} ${play ? "is-play" : ""} ${tabs ? "has-tabs" : ""}" style="${accentStyle(concert)}">
       ${play ? "" : topbar()}
       <main>${body}</main>
       ${tabs ? tabbar() : ""}
@@ -250,20 +273,42 @@ function tabbar() {
 
 function tabOn(id) {
   const name = session.route.name;
-  if (id === "home") return ["home", "song", "add", "edit"].includes(name);
-  if (id === "concerts") return ["concerts", "concert"].includes(name);
+  const section = navSection();
+  if (id === "home") {
+    if (["song", "add", "edit", "play", "results"].includes(name)) return section === "home";
+    return name === "home";
+  }
+  if (id === "concerts") {
+    if (["song", "add", "edit", "play", "results"].includes(name)) return section === "concerts";
+    return name === "concerts" || name === "concert";
+  }
   return name === id;
+}
+
+function navSection() {
+  if (session.section) return session.section;
+  const route = session.route;
+  if (route.name === "add" && session.form?.fromConcert) return "concerts";
+  if (["song", "edit", "play", "results"].includes(route.name)) {
+    const song = findSong(route.songId || session.play?.songId || session.results?.songId);
+    if (song && concertsForSong(session.concerts, song.title, song.artist).length) return "concerts";
+  }
+  return "home";
 }
 
 function viewHome() {
   const songs = [...session.state.songs].sort((a, b) => b.updatedAt - a.updatedAt);
   const concert = session.concerts[0];
   const summary = concert ? activeConcertSummary(concert, session.state.songs, progressOf(session.state)) : null;
+  const upcoming = (summary?.slots || []).filter((slot) => !slot.mastered).slice(0, 3);
+  const upNext = upcoming.length ? `
+    <p class="kicker">Up next</p>
+    <div class="rows" data-testid="up-next">${upcoming.map((slot) => upNextRow(concert, slot)).join("")}</div>` : "";
   const hero = concert && summary?.total ? `
-    <header class="hero accent-${accentForId(concert.id)}">
+    <header class="hero" style="${accentStyle(concert)}">
       <p class="kicker">Next up</p>
       <h1>${escapeHtml(concert.name)}</h1>
-      <p class="hero-stat">${summary.mastered}/${summary.total} mastered</p>
+      <p class="hero-stat" data-testid="home-status">${escapeHtml(concertStatusLine(summary))}</p>
       <a class="btn btn-hero" href="#/concert/${encodeURIComponent(concert.id)}">Continue</a>
       <a class="btn btn-text btn-text-on-hero" href="#/add" data-testid="add-song">Add song</a>
     </header>` : `
@@ -281,10 +326,22 @@ function viewHome() {
   return `
     <section class="screen">
       ${hero}
+      ${upNext}
       <p class="kicker">Songs</p>
       ${list}
     </section>
   `;
+}
+
+function upNextRow(concert, slot) {
+  const href = slot.status === "needs-lyrics"
+    ? `#/add?title=${encodeURIComponent(slot.title)}&artist=${encodeURIComponent(slot.artist)}&concert=${encodeURIComponent(concert.id)}`
+    : `#/song/${encodeURIComponent(slot.songId)}`;
+  return `
+    <a class="set-row up-row" data-testid="up-next-row" href="${href}">
+      <span class="set-num">${slot.index + 1}</span>
+      <span class="row-main"><strong>${escapeHtml(slot.title)}</strong><span class="sub">${escapeHtml(slot.artist)}</span></span>
+    </a>`;
 }
 
 function songCard(song) {
@@ -382,7 +439,7 @@ function viewPaste() {
       <div class="stack">
         ${body}
         <p id="form-error" class="error" role="alert">${escapeHtml(form.error || "")}</p>
-        ${nextLyricsLink(form.title, form.artist, form.fromConcert)}
+        ${form.fallback && form.debug ? `<p class="fine" data-testid="paste-debug">${escapeHtml(form.debug)}</p>` : ""}
       </div>
     </section>
   `;
@@ -420,53 +477,65 @@ function titleFieldsVisible(parsed) {
 function viewSong() {
   const song = findSong(session.route.songId);
   if (!song) return missing("That song is not on this device.", "#/");
-  const stats = songStats(progressOf(session.state), song);
+  const progress = progressOf(session.state);
+  const stats = songStats(progress, song);
   const availability = gameAvailability(song.lines, song.sections || []);
+  const plan = chapterPlan(song.lines, song.sections || [], stats.chapters || {});
+  const playable = plan.filter((chapter) => chapter.status !== "unavailable");
+  const doneCount = playable.filter((chapter) => chapter.status === "done").length;
   const reasons = {
     fill: "Needs a line with a word to hide",
     order: "Needs a line with at least 3 words",
-    next: "Needs at least 3 lines",
-    letters: "Needs a line to hint",
-    concert: "Needs a line to perform",
-    sections: "Needs at least two sections",
-    lines: "Needs a section with two lines"
+    letters: "Needs a line to hint"
   };
-  const group = (name) => GAMES.filter((game) => game.group === name).map((game) => {
-    const final = game.id === "concert" ? " is-final" : "";
+  const chapters = plan.map((chapter, index) => {
+    if (chapter.status === "unavailable") {
+      return `<button class="game" type="button" disabled><span>${index + 1} ${escapeHtml(chapter.name)}<small>Not enough lines</small></span></button>`;
+    }
+    if (chapter.status === "locked") {
+      return `<button class="game" type="button" disabled><span>${index + 1} ${escapeHtml(chapter.name)}<small>Finish the previous chapter</small></span></button>`;
+    }
+    const mark = chapter.status === "done" ? "Done" : "Open";
+    return `
+      <a class="game${chapter.id === "concert" ? " is-final" : ""}" data-testid="game-${chapter.id}" href="#/play/${encodeURIComponent(song.id)}/${chapter.id}">
+        <span>${index + 1} ${escapeHtml(chapter.name)}<small>${escapeHtml(chapter.detail)} · ${mark}</small></span>
+      </a>`;
+  }).join("");
+  const warm = GAMES.filter((game) => game.group === "warm").map((game) => {
     if (!availability[game.id]) {
-      return `<button class="game${final}" type="button" disabled><span>${escapeHtml(game.name)}<small>${reasons[game.id]}</small></span></button>`;
+      return `<button class="game" type="button" disabled><span>${escapeHtml(game.name)}<small>${reasons[game.id]}</small></span></button>`;
     }
     return `
-      <a class="game${final}" data-testid="game-${game.id}" href="#/play/${encodeURIComponent(song.id)}/${game.id}">
+      <a class="game" data-testid="game-${game.id}" href="#/play/${encodeURIComponent(song.id)}/${game.id}">
         <span>${escapeHtml(game.name)}<small>${escapeHtml(game.detail)}</small></span>
-      </a>
-    `;
+      </a>`;
   }).join("");
   const concerts = concertsForSong(session.concerts, song.title, song.artist);
-  const links = concerts.map((concert) => `<a class="text-link" href="#/concert/${encodeURIComponent(concert.id)}">${escapeHtml(concert.name)}</a>`).join("");
-  const progressLine = stats.linesMastered > 0
-    ? `${stats.linesMastered} of ${stats.lineCount} lines mastered`
-    : "No lines mastered yet";
+  const concert = concerts[0];
+  const links = concerts.map((item) => `<a class="text-link" href="#/concert/${encodeURIComponent(item.id)}">${escapeHtml(item.name)}</a>`).join("");
+  const progressLine = stats.songMastered
+    ? "Song mastered"
+    : `${doneCount} of ${playable.length} chapters`;
   return `
     <section class="screen">
-      <header class="hero hero-song">
-        <a class="back back-on-hero" href="#/">${icon("back")} Songs</a>
+      <header class="hero hero-song" style="${accentStyle(concert)}">
+        <a class="back back-on-hero" href="${concert ? `#/concert/${encodeURIComponent(concert.id)}` : "#/"}">${icon("back")} ${concert ? "Concert" : "Songs"}</a>
         <h1>${escapeHtml(song.title)}</h1>
         <p class="hero-stat">${escapeHtml(song.artist)}${song.sample ? " · Sample" : ""}</p>
       </header>
       <div class="meter-block">
-        <p class="sub" data-testid="song-mastery">${progressLine}</p>
+        <p class="sub" data-testid="chapter-progress">${progressLine}</p>
+        <p class="sub" data-testid="song-mastery">${stats.linesMastered} of ${stats.lineCount} lines mastered</p>
         ${meter(stats.masteryPercent)}
       </div>
       ${links ? `<p class="sub">On the setlist: ${links}</p>` : ""}
-      <p class="kicker">Lessons</p>
-      <div class="game-list">${group("main")}</div>
+      <p class="kicker">Chapters</p>
+      <div class="game-list">${chapters}</div>
       <p class="kicker">Tricky lines</p>
-      <div class="game-list">${group("warm")}</div>
+      <div class="game-list">${warm}</div>
       <div class="dock">
         <a class="btn btn-text" href="#/edit/${encodeURIComponent(song.id)}">Edit lyrics</a>
         <button class="btn btn-text btn-danger" type="button" data-action="ask-delete" data-id="${escapeHtml(song.id)}">Delete song</button>
-        ${nextLyricsLink(song.title, song.artist, "")}
       </div>
     </section>
   `;
@@ -482,85 +551,134 @@ function viewPlay() {
   const hearts = Array.from({ length: play.maxHearts }, (_, index) => `
     <span class="heart ${index < play.hearts ? "" : "is-empty"}">${icon("heart")}</span>
   `).join("");
+  const seconds = questionSeconds(question);
   const timer = play.gameId === "concert" && !play.feedback ? `
     <div class="timer" data-testid="timer">
       <div class="timer-track"><span id="timer-bar"></span></div>
-      <span class="timer-label" id="timer-label">${CONCERT_SECONDS}s</span>
+      <span class="timer-label" id="timer-label">${formatSeconds(seconds)}</span>
     </div>
   ` : "";
   const around = contextHtml(question);
+  const check = !play.feedback && question.kind === "order" ? `
+    <div class="dock">
+      <button class="btn btn-primary" type="button" data-action="check" data-primary data-testid="check">Check <span class="key-hint">Enter</span></button>
+    </div>` : "";
   return `
     <section class="screen" data-testid="play">
       <div class="play-top">
         <button class="icon-btn" type="button" data-action="leave" data-testid="leave-lesson" aria-label="Close lesson">${icon("close")}</button>
-        <div class="lesson-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${shown}" data-testid="lesson-progress">
-          <span style="width:${width}%"></span>
+        <p class="play-crumb" data-testid="play-crumb">${escapeHtml(playCrumb(play, question))}</p>
+        <div class="play-meta">
+          <span class="score-pill" data-testid="score-pill">${formatScore(play.score)}</span>
+          <div class="hearts" data-testid="hearts" aria-label="${play.hearts} hearts left">${hearts}</div>
         </div>
-        <div class="hearts" data-testid="hearts" aria-label="${play.hearts} hearts left">${hearts}</div>
       </div>
-      <p class="kicker">${escapeHtml(play.gameName)}</p>
-      <p class="ask">${play.index + 1} / ${total}${play.combo >= 2 ? ` · ${play.combo} in a row` : ""}</p>
+      <div class="lesson-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${shown}" data-testid="lesson-progress">
+        <span style="width:${width}%"></span>
+      </div>
       ${timer}
       ${around.before}
       ${questionHtml(question)}
       ${around.after}
-      ${play.feedback ? feedbackHtml(play) : answerControls(question)}
-      ${nextLyricsLink(play.title || findSong(play.songId)?.title, play.artist || findSong(play.songId)?.artist, "")}
+      ${play.feedback ? feedbackHtml(play) : `${answerControls(question)}${check}`}
     </section>
   `;
 }
 
+function formatSeconds(seconds) {
+  return Number.isInteger(seconds) ? `${seconds}s` : `${seconds.toFixed(1)}s`;
+}
+
+function playCrumb(play, question) {
+  const context = question?.context || {};
+  let place = "";
+  if (context.section && context.position) place = `${context.section}, line ${context.position}`;
+  else if (context.rangeLabel) place = context.rangeLabel;
+  else if (context.position) place = `line ${context.position}`;
+  return place ? `${play.gameName} · ${place}` : play.gameName;
+}
+
 function contextHtml(question) {
   const context = question?.context;
-  if (!context?.total && !context?.rangeLabel) return { before: "", after: "" };
-  const bits = [];
-  if (context.rangeLabel) bits.push(context.rangeLabel);
-  else {
-    if (context.section) bits.push(context.section);
-    if (context.total) bits.push(`line ${context.position} of ${context.total}`);
-  }
-  const meta = bits.length ? `<p class="context-meta" data-testid="line-context">${escapeHtml(bits.join(" · "))}</p>` : "";
-  const showPrevious = context.previous && question.kind !== "next" && question.kind !== "sections";
+  if (!context) return { before: "", after: "" };
+  const showPrevious = context.previous && question.kind !== "next" && question.kind !== "sections" && !question.hidesPrevious;
   const previous = showPrevious ? `<p class="context-line is-anchor" data-testid="context-previous">${escapeHtml(context.previous)}</p>` : "";
-  const next = context.next && question.kind !== "sections" && question.kind !== "lines"
+  const allowNext = session.play?.gameId === "lines" && question.kind === "lines";
+  const next = allowNext && context.next
     ? `<p class="context-line" data-testid="context-next">${escapeHtml(context.next)}</p>` : "";
-  return { before: `${meta}${previous}`, after: next };
+  return { before: previous, after: next };
 }
 
 function questionHtml(question) {
+  if (question.kind === "order") return orderTargetHtml(question);
   if (question.kind === "fill") {
     const picked = session.play.picked;
     const before = question.before ? `${escapeHtml(question.before)} ` : "";
     const after = question.after ? ` ${escapeHtml(question.after)}` : "";
-    const blank = picked ? escapeHtml(picked) : "______";
-    return `<p class="prompt" data-testid="question">${before}<span class="blank ${picked ? "filled" : ""}">${blank}</span>${after}</p>`;
+    const blank = picked ? escapeHtml(picked) : "";
+    return `<p class="target-line" data-testid="question">${before}<span class="target-blank ${picked ? "filled" : ""}">${blank}</span>${after}</p>`;
   }
   if (question.kind === "next") {
-    return `<p class="prompt" data-testid="question">${escapeHtml(question.prompt)}</p><p class="ask">What comes next?</p>`;
+    return `<p class="target-line" data-testid="question">${escapeHtml(question.prompt)}</p><p class="ask">What comes next?</p>`;
+  }
+  if (question.kind === "previous") {
+    return `<p class="target-line" data-testid="question">${escapeHtml(question.prompt)}</p><p class="ask">What comes before?</p>`;
   }
   if (question.kind === "letters") {
-    return `<p class="hint-line" data-testid="question">${escapeHtml(question.hint)}</p><p class="ask">Type the full line</p>`;
+    return `<p class="hint-line" data-testid="question">${escapeHtml(question.hint)}</p><p class="ask">Pick the line</p>`;
   }
-  if (question.kind === "sections") return `<p class="ask" data-testid="question">Tap the sections in order</p>`;
+  if (question.kind === "truth") {
+    return `<p class="target-line" data-testid="question">${escapeHtml(question.prompt)}</p><p class="ask">Does this line come right after?</p><p class="target-line">${escapeHtml(question.claim)}</p>`;
+  }
+  if (question.kind === "which") {
+    return `<p class="target-line" data-testid="question">${escapeHtml(question.prompt)}</p><p class="ask">Which section is this?</p>`;
+  }
+  if (question.kind === "intruder") return `<p class="ask" data-testid="question">Which line does not belong?</p>`;
+  if (question.kind === "swap") return `<p class="ask" data-testid="question">Tap the word that does not belong</p>`;
+  if (question.kind === "sections") return `<p class="ask" data-testid="question">Tap the opening lines in order</p>`;
   if (question.kind === "lines") return `<p class="ask" data-testid="question">Tap the lines in order</p>`;
   return `<p class="ask" data-testid="question">Tap the words in order</p>`;
 }
 
+function orderTargetHtml(question) {
+  const order = session.play?.order;
+  const arranged = order && order.index === session.play.index ? order.arranged : [];
+  const byId = new Map(question.tokens.map((token) => [token.id, token.text]));
+  const words = question.tokens.map((token, index) => {
+    const placed = byId.get(arranged[index] || "");
+    if (!placed) return `<span class="target-blank"></span>`;
+    return `<span class="target-word">${escapeHtml(placed)}</span>`;
+  }).join(" ");
+  return `<p class="target-line" data-testid="question">${words}</p>`;
+}
+
+function keyHint(index) {
+  if (index > 8) return "";
+  return `<span class="key-hint">${index + 1}</span>`;
+}
+
 function answerControls(question) {
-  if (question.kind === "next") {
+  if (question.choices && question.kind !== "order") {
     return `<div class="choices">${question.choices.map((choice, index) => `
-      <button class="choice" type="button" data-action="choose" data-choice="${index}">${escapeHtml(choice)}</button>
+      <button class="choice" type="button" data-action="choose" data-option="${index}" data-choice="${index}">${keyHint(index)}${escapeHtml(choice)}</button>
+    `).join("")}</div>`;
+  }
+  if (question.kind === "swap") {
+    return `<div class="pool">${question.words.map((word, index) => `
+      <button class="token" type="button" data-action="pick-swap" data-option="${index}" data-token="${escapeHtml(word.id)}">${keyHint(index)}${escapeHtml(word.text)}</button>
     `).join("")}</div>`;
   }
   if (question.kind === "order" || question.kind === "lines" || question.kind === "sections") {
     const order = ensureOrder();
     const stacked = question.kind === "order" ? "" : " is-stacked";
-    const byId = new Map(question.tokens.map((token) => [token.id, token.text]));
-    const placed = order.arranged.map((id) => `
-      <span class="token is-set${order.justPlaced === id ? " is-placed" : ""}">${escapeHtml(byId.get(id) || "")}</span>
-    `).join("");
-    const pool = order.pool.map((id) => `
-      <button class="token" type="button" data-action="pick-token" data-token="${escapeHtml(id)}">${escapeHtml(byId.get(id) || "")}</button>
+    const byId = new Map(question.tokens.map((token) => [token.id, token]));
+    const placed = order.arranged.map((id) => {
+      const token = byId.get(id);
+      const tag = question.kind === "sections" && token?.label ? `<span class="token-tag">${escapeHtml(token.label)}</span>` : "";
+      return `<span class="token is-set${order.justPlaced === id ? " is-placed" : ""}">${escapeHtml(token?.text || "")}${tag}</span>`;
+    }).join("");
+    const pool = order.pool.map((id, index) => `
+      <button class="token" type="button" data-action="pick-token" data-option="${index}" data-token="${escapeHtml(id)}">${keyHint(index)}${escapeHtml(byId.get(id)?.text || "")}</button>
     `).join("");
     const empty = question.kind === "sections" ? "The order appears here" : "Your line appears here";
     return `
@@ -568,18 +686,7 @@ function answerControls(question) {
       <div class="pool${stacked}">${pool}</div>
     `;
   }
-  const bank = question.kind === "fill" ? `<div class="choices">${question.choices.map((choice, index) => `
-    <button class="choice ${session.play.picked === choice ? "is-picked" : ""}" type="button" data-action="pick" data-choice="${index}">${escapeHtml(choice)}</button>
-  `).join("")}</div>` : "";
-  return `
-    ${bank}
-    <form id="answer-form" class="stack dock">
-      <label class="field">${question.kind === "fill" ? "Or type it" : "Line"}
-        <input id="answer-input" data-testid="answer-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" value="${escapeHtml(session.play.typed || "")}">
-      </label>
-      <button class="btn btn-primary" type="submit" data-testid="check">Check</button>
-    </form>
-  `;
+  return "";
 }
 
 function feedbackHtml(play) {
@@ -590,39 +697,52 @@ function feedbackHtml(play) {
   return `
     <div class="feedback ${feedback.correct ? "is-good" : "is-bad"}" role="status" data-testid="feedback">
       <p><strong>${praise}${xp}</strong></p>
-      ${feedback.correct ? "" : `<p class="answer">${escapeHtml(feedback.answer)}</p>`}
+      <p class="answer">${escapeHtml(feedback.answer)}</p>
     </div>
-    <div class="dock"><button class="btn btn-primary" type="button" data-action="continue" data-testid="continue">${nextLabel}</button></div>
+    <div class="dock"><button class="btn btn-primary" type="button" data-action="continue" data-primary data-testid="continue">${nextLabel} <span class="key-hint">Enter</span></button></div>
   `;
 }
 
 function viewResults() {
   const results = session.results;
   if (!results) return "";
-  const concerts = concertsForSong(session.concerts, results.title, results.artist)
-    .map((concert) => `<a class="btn btn-text" href="#/concert/${encodeURIComponent(concert.id)}">${escapeHtml(concert.name)}</a>`)
-    .join("");
+  const song = findSong(results.songId);
+  const progress = progressOf(session.state);
+  const stats = song ? songStats(progress, song) : null;
+  const sections = song ? sectionProgress(song.lines, song.sections || [], stats?.rounds || {}) : [];
+  const open = results.showSections ? `
+    <div class="section-list" data-testid="section-list">
+      ${sections.map((section) => `
+        <button class="choice" type="button" data-action="practice-chunk" data-start="${section.start}" data-round="${escapeHtml(section.roundId)}">
+          <span>${escapeHtml(section.opener)}</span>
+          <span class="sub">${section.mastered}/${section.total}${section.done ? " · done" : ""}</span>
+        </button>
+        ${section.done ? `<button class="btn btn-text" type="button" data-action="practice-again" data-round="${escapeHtml(section.roundId)}">Practice again</button>` : ""}
+      `).join("")}
+    </div>` : "";
+  const finalLocked = song ? chapterPlan(song.lines, song.sections || [], stats?.chapters || {}).find((item) => item.id === "concert")?.status === "locked" : false;
   const bits = [];
   if (results.xp > 0) bits.push(`${results.xp} XP`);
   if (results.accuracy > 0) bits.push(`${results.accuracy}% accuracy`);
   if (results.streak > 0) bits.push(`<span data-testid="result-streak">${results.streak}</span> day streak`);
-  const mastered = results.linesMastered > 0
-    ? `${results.linesMastered} of ${results.lineCount} lines mastered`
-    : "No lines mastered yet";
   return `
     <section class="screen">
       <header class="page-head">
-        <p class="kicker">${results.newBest ? "New best" : "Lesson complete"}</p>
+        <p class="kicker">${results.songMastered ? "Song mastered" : (results.newBest ? "New best" : "Round complete")}</p>
         <h1 data-testid="final-score">${formatScore(results.score)}</h1>
         <p class="sub">${escapeHtml(results.title)} · ${escapeHtml(results.artist)}</p>
       </header>
-      ${bits.length ? `<p class="sub">${bits.join(" · ")}</p>` : `<p class="sub">Finish another round when you are ready.</p>`}
-      <p class="sub">${mastered}</p>
+      <p class="sub" data-testid="hearts-left">${results.hearts} hearts left</p>
+      ${bits.length ? `<p class="sub">${bits.join(" · ")}</p>` : ""}
       <div class="dock">
-        <button class="btn btn-primary" type="button" data-action="share-results" data-testid="share-score">Share my score</button>
-        <a class="btn btn-text" href="#/play/${encodeURIComponent(results.songId)}/${results.gameId}">Practice again</a>
+        <button class="btn btn-primary" type="button" data-action="keep-practicing" data-primary data-testid="keep-practicing">Keep practicing <span class="key-hint">Enter</span></button>
+        <button class="btn btn-secondary" type="button" data-action="toggle-sections" data-testid="practice-section">Practice a section</button>
+        ${open}
+        ${finalLocked
+          ? `<button class="btn btn-secondary" type="button" disabled data-testid="final-run">Final run</button>`
+          : `<a class="btn btn-secondary" data-testid="final-run" href="#/play/${encodeURIComponent(results.songId)}/concert">Final run</a>`}
+        <button class="btn btn-text" type="button" data-action="share-results" data-testid="share-score">Share my score</button>
         <a class="btn btn-text" href="#/song/${encodeURIComponent(results.songId)}">Back to song</a>
-        ${concerts}
         ${nextLyricsLink(results.title, results.artist, "")}
       </div>
     </section>
@@ -672,7 +792,7 @@ async function viewConcert() {
   const board = leaderboardFromSongScores(scores, concert.setlist);
   const playerNoun = participants === 1 ? "player" : "players";
   const where = provider.source === "device" ? "on this device" : "on the shared board";
-  const masteredLine = summary.total ? `${summary.mastered}/${summary.total} mastered` : "No setlist posted yet";
+  const masteredLine = concertStatusLine(summary);
   const setlist = summary.total ? summary.slots.map((slot) => setlistRow(concert, slot)).join("") : `
     <p class="empty">Add title and artist pairs to concerts.json. Leave lyrics out of that file.</p>
   `;
@@ -686,15 +806,15 @@ async function viewConcert() {
   const people = participants > 0 ? `<p class="sub" data-testid="participants">${participants} ${playerNoun} ${where}</p>` : "";
   return `
     <section class="screen" data-testid="concert-page">
-      <header class="hero accent-${accentForId(concert.id)}">
+      <header class="hero" style="${accentStyle(concert)}">
         <a class="back back-on-hero" href="#/concerts">${icon("back")} Concerts</a>
         <p class="kicker">Concert</p>
         <h1>${escapeHtml(concert.name)}</h1>
         ${concert.label ? `<p class="hero-stat" data-testid="concert-label">${escapeHtml(concert.label)}</p>` : ""}
-        <p class="hero-stat" data-testid="concert-mastered">${masteredLine}</p>
+        <p class="hero-stat" data-testid="concert-mastered">${escapeHtml(masteredLine)}</p>
         ${summary.total ? meter(summary.total ? Math.round((summary.mastered / summary.total) * 100) : 0) : ""}
-        ${concert.source ? `<p class="hero-stat"><a class="text-link" data-testid="concert-source" href="${escapeHtml(concert.source)}" target="_blank" rel="noopener noreferrer">Source setlist</a></p>` : ""}
       </header>
+      ${concert.source ? `<p class="sub"><a class="text-link" data-testid="concert-source" href="${escapeHtml(concert.source)}" target="_blank" rel="noopener noreferrer">Source setlist</a></p>` : ""}
       ${summary.score > 0 ? `<p class="sub" data-testid="concert-score">Your score ${formatScore(summary.score)}</p>` : ""}
       ${people}
       ${nextLyricsLink("", "", concert.id)}
@@ -1002,19 +1122,33 @@ function writeSong({ songId, title, artist, lines, sections }) {
   return song;
 }
 
-function showPasteFallback() {
+function showPasteFallback(error) {
   const form = session.form;
   if (!form) return;
   form.fallback = true;
   form.manual = false;
   form.error = "";
+  form.debug = error?.name || "Error";
   render();
 }
 
-function readClipboardNow() {
-  readClipboardFromGesture()
-    .then((text) => applyPastedText(text))
-    .catch(() => showPasteFallback());
+function onClickPaste(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const pending = readClipboardFromGesture();
+  const form = session.form;
+  pending.then((text) => {
+    if (!form || session.form !== form) return;
+    if (!String(text || "").trim()) {
+      if (form.preview) return;
+      showPasteFallback(Object.assign(new Error("empty"), { name: "NotFoundError" }));
+      return;
+    }
+    applyPastedText(String(text));
+  }).catch((error) => {
+    if (!form || session.form !== form || form.preview) return;
+    showPasteFallback(error);
+  });
 }
 
 function applyPastedText(text) {
@@ -1083,7 +1217,7 @@ function nextLyricsLink(title, artist, concertId) {
     const slot = summary.slots.find((item) => item.status === "needs-lyrics" && !(title && artist && songsMatch(item.title, item.artist, title, artist)));
     if (!slot) continue;
     const href = `#/add?title=${encodeURIComponent(slot.title)}&artist=${encodeURIComponent(slot.artist)}&concert=${encodeURIComponent(concert.id)}`;
-    return `<a class="btn btn-text" data-testid="next-lyrics" href="${href}">Next song needing lyrics</a>`;
+    return `<a class="btn btn-outline" data-testid="next-lyrics" href="${href}">Next song</a>`;
   }
   return "";
 }
@@ -1106,11 +1240,18 @@ function ensurePlay() {
     go(`#/song/${encodeURIComponent(song.id)}`);
     return false;
   }
-  const key = `${song.id}:${game.id}`;
+  const roundId = route.params.round || "";
+  const chunk = route.params.chunk === undefined || route.params.chunk === "" ? null : Number(route.params.chunk);
+  const key = `${song.id}:${game.id}:${roundId}:${chunk ?? ""}`;
   if (session.play?.key === key) return true;
-  const questions = buildLesson(song.lines, game.id, Math.random, song.sections || []);
+  const skipIds = route.params.again === "1" || game.id === "concert" ? [] : masteredRoundIds(progressOf(session.state), song);
+  const questions = buildLesson(song.lines, game.id, Math.random, song.sections || [], {
+    skipIds,
+    roundId,
+    chunk: Number.isInteger(chunk) ? chunk : undefined
+  });
   if (!questions.length) {
-    armToast("That game needs more lines in this song.");
+    armToast(skipIds.length ? "That chapter is mastered." : "That game needs more lines in this song.");
     go(`#/song/${encodeURIComponent(song.id)}`);
     return false;
   }
@@ -1135,6 +1276,7 @@ function ensurePlay() {
     picked: null,
     typed: "",
     order: null,
+    questionMistakes: 0,
     deadline: null,
     finishing: false
   };
@@ -1168,26 +1310,26 @@ function submitCurrent(forced = null) {
   let correct = false;
   if (forced?.timeout) {
     correct = false;
-  } else if (question.kind === "next") {
+  } else if (question.kind === "swap") {
+    if (!forced?.swapId) return;
+    correct = gradeAnswer(question, forced.swapId);
+  } else if (question.choices) {
     play.picked = forced?.choice ?? play.picked;
     if (!play.picked) return;
-    correct = play.picked === question.answer;
+    correct = answersMatch(question.answer, play.picked);
   } else if (question.kind === "order" || question.kind === "lines" || question.kind === "sections") {
     if (forced?.orderFailed) {
       correct = false;
     } else {
       const order = ensureOrder();
-      if (order.arranged.length !== question.tokens.length) return;
-      correct = isOrderCorrect(question, order.arranged);
+      if (order.arranged.length !== question.tokens.length) {
+        showPlayNote("Place every word first.");
+        return;
+      }
+      correct = gradeAnswer(question, order.arranged);
     }
   } else {
-    const typed = document.getElementById("answer-input")?.value || play.typed || "";
-    const guess = typed.trim() || (question.kind === "fill" ? play.picked || "" : "");
-    if (!guess) {
-      showPlayNote(question.kind === "fill" ? "Type or tap the missing word." : "Type the line.");
-      return;
-    }
-    correct = answersMatch(question.answer, guess);
+    return;
   }
   play.locked = true;
   stopTimer();
@@ -1198,22 +1340,29 @@ function submitCurrent(forced = null) {
     play.bestCombo = Math.max(play.bestCombo, play.combo);
   } else {
     play.combo = 0;
-    if (!forced?.orderFailed) play.hearts = Math.max(0, play.hearts - 1);
+    if (!forced?.orderFailed) {
+      play.questionMistakes += 1;
+      play.hearts = Math.max(0, play.hearts - 1);
+    }
   }
   const secondsLeft = play.gameId === "concert" && play.deadline
     ? Math.max(0, (play.deadline - performance.now()) / 1000)
     : null;
+  if (question.roundId) {
+    recordRoundResult(progressOf(session.state), song, {
+      roundId: question.roundId,
+      mistakes: play.questionMistakes,
+      completed: correct
+    });
+  }
   const points = pointsFor({ kind: question.kind, correct, combo: play.combo, secondsLeft });
   play.xp += points.xp;
   play.score += points.score;
   recordLineResult(progressOf(session.state), song, { line: question.line, correct, xpGain: points.xp });
   persist();
-  const arranged = question.tokens
-    ? question.tokens.map((token) => token.text).join(question.kind === "order" ? " " : "\n")
-    : question.line;
   play.feedback = {
     correct,
-    answer: arranged,
+    answer: correctLine(question),
     xp: points.xp,
     timeout: Boolean(forced?.timeout)
   };
@@ -1246,9 +1395,29 @@ function continueLesson() {
   play.picked = null;
   play.typed = "";
   play.order = null;
+  play.questionMistakes = 0;
   play.deadline = null;
   stopTimer();
   render();
+}
+
+function keepPracticing() {
+  const results = session.results;
+  const song = results && findSong(results.songId);
+  if (!song) return;
+  const stats = songStats(progressOf(session.state), song);
+  const step = nextPractice(song.lines, song.sections || [], { rounds: stats.rounds || {}, chapters: stats.chapters || {} });
+  const query = step.roundId ? `?round=${encodeURIComponent(step.roundId)}` : "";
+  go(`#/play/${encodeURIComponent(song.id)}/${step.gameId}${query}`);
+}
+
+function watchNetlifyBadge() {
+  const hide = () => {
+    document.querySelectorAll("#netlify-drawer, .netlify-drawer, [data-netlify-deploy-id], iframe[name='netlify-drawer'], iframe[title*='Netlify']").forEach((node) => node.remove());
+  };
+  hide();
+  const observer = new MutationObserver(hide);
+  observer.observe(document.documentElement, { childList: true, subtree: true });
 }
 
 async function finishLesson() {
@@ -1264,6 +1433,7 @@ async function finishLesson() {
     addBonusXp(progress, song, bonus);
     play.xp += bonus;
   }
+  if (song && play.index >= play.questions.length - 1) markChapter(progress, song, play.gameId);
   const run = recordRun(progress, song, { score: play.score, gameId: play.gameId });
   const streak = finishStreak(progress);
   const stats = songStats(progress, song);
@@ -1296,6 +1466,8 @@ async function finishLesson() {
     masteryPercent: stats.masteryPercent,
     linesMastered: stats.linesMastered,
     lineCount: stats.lineCount,
+    hearts: play.hearts,
+    songMastered: Boolean(stats.songMastered),
     streak: streak.count,
     playerName: player.name
   };
@@ -1306,7 +1478,9 @@ async function finishLesson() {
 function startTimer() {
   const play = session.play;
   if (timerId || !play || play.locked || play.gameId !== "concert" || session.route.name !== "play") return;
-  if (!play.deadline) play.deadline = performance.now() + CONCERT_SECONDS * 1000;
+  const limit = questionSeconds(currentQuestion());
+  play.limit = limit;
+  if (!play.deadline) play.deadline = performance.now() + limit * 1000;
   timerId = setInterval(() => {
     if (!session.play || session.play.locked) {
       stopTimer();
@@ -1315,8 +1489,9 @@ function startTimer() {
     const left = session.play.deadline - performance.now();
     const bar = document.getElementById("timer-bar");
     const label = document.getElementById("timer-label");
-    if (bar) bar.style.transform = `scaleX(${Math.max(0, left / (CONCERT_SECONDS * 1000))})`;
-    if (label) label.textContent = `${Math.max(0, Math.ceil(left / 1000))}s`;
+    const span = (session.play.limit || limit) * 1000;
+    if (bar) bar.style.transform = `scaleX(${Math.max(0, left / span)})`;
+    if (label) label.textContent = formatSeconds(Math.max(0, Math.ceil(left / 100) / 10));
     if (left <= 0) {
       stopTimer();
       submitCurrent({ timeout: true });
@@ -1564,6 +1739,8 @@ function afterRender() {
   updateFindLink();
   const lyrics = document.getElementById("lyrics");
   if (session.route.name === "add" && session.form?.fallback && !session.form.preview && lyrics) lyrics.focus();
+  const paste = document.querySelector("[data-testid=paste-clipboard]");
+  if (paste) paste.addEventListener("click", onClickPaste);
   startTimer();
 }
 
@@ -1608,6 +1785,7 @@ function judgePickedToken(button) {
   if (!judgeOrderTap(question, order.arranged, id)) {
     play.orderBusy = true;
     play.combo = 0;
+    play.questionMistakes += 1;
     play.hearts = Math.max(0, play.hearts - 1);
     paintHearts();
     button.classList.add("is-reject");
@@ -1634,18 +1812,42 @@ function judgePickedToken(button) {
     order.justPlaced = id;
     const done = order.arranged.length === question.tokens.length;
     render();
-    if (done) window.setTimeout(() => {
+    if (done && question.kind !== "order") window.setTimeout(() => {
       if (session.play === play && !play.locked) submitCurrent({ orderComplete: true });
     }, motionDelay());
   }, motionDelay());
 }
 
-function onClick(event) {
-  const clickTarget = event.target instanceof Element ? event.target : event.target?.parentElement;
-  if (clickTarget?.closest("[data-action=paste-clipboard]")) {
-    readClipboardNow();
+function onKeyDown(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const target = event.target instanceof Element ? event.target : null;
+  const field = target?.closest("input, textarea, select, [contenteditable='true']");
+  if (field) return;
+  if (target?.closest("button, a") && event.key === "Enter") return;
+  if (event.key === "Enter") {
+    const primary = document.querySelector("dialog[open] [data-primary], dialog[open] [data-action=confirm-modal]")
+      || document.querySelector("[data-primary]");
+    if (!primary || primary.disabled) return;
+    event.preventDefault();
+    primary.click();
     return;
   }
+  if (/^[1-9]$/.test(event.key)) {
+    const option = document.querySelector(`[data-option="${Number(event.key) - 1}"]`);
+    if (!option || option.disabled) return;
+    event.preventDefault();
+    option.click();
+  }
+}
+
+function onClick(event) {
+  const clickTarget = event.target instanceof Element ? event.target : event.target?.parentElement;
+  const link = clickTarget?.closest("a[href]");
+  if (link?.dataset.testid === "song-card" || link?.dataset.testid === "nav-home") session.section = "home";
+  if (link?.dataset.testid === "setlist-slot" || link?.dataset.testid === "up-next-row" || link?.dataset.testid === "nav-concerts" || link?.closest("[data-testid=concert-page]")) {
+    session.section = "concerts";
+  }
+  if (clickTarget?.closest("[data-action=paste-clipboard]")) return;
   const finder = clickTarget?.closest("#find-lyrics");
   if (finder?.dataset.disabled === "true") {
     event.preventDefault();
@@ -1684,18 +1886,36 @@ function onClick(event) {
     render();
   } else if (action === "ask-delete") askDelete(el.dataset.id);
   else if (action === "leave") leaveLesson();
-  else if (action === "pick") {
-    rememberTyped();
-    const choice = currentQuestion()?.choices?.[Number(el.dataset.choice)];
-    if (choice) session.play.picked = session.play.picked === choice ? null : choice;
-    render();
-  } else if (action === "choose") {
+  else if (action === "choose") {
     const choice = currentQuestion()?.choices?.[Number(el.dataset.choice)];
     if (choice) submitCurrent({ choice });
-  } else if (action === "pick-token") {
+  }   else if (action === "pick-token") {
     judgePickedToken(el);
+  } else if (action === "pick-swap") {
+    const button = el;
+    const question = currentQuestion();
+    const word = question?.words?.find((item) => item.id === button.dataset.token);
+    if (!word || !session.play || session.play.locked) return;
+    button.classList.add(word.wrong ? "is-accept" : "is-reject");
+    if (!word.wrong) {
+      session.play.questionMistakes += 1;
+      session.play.hearts = Math.max(0, session.play.hearts - 1);
+      paintHearts();
+      if (session.play.hearts <= 0) submitCurrent({ swapId: word.id });
+      return;
+    }
+    submitCurrent({ swapId: word.id });
   } else if (action === "check") submitCurrent();
-  else if (action === "continue") continueLesson();
+  else if (action === "keep-practicing") keepPracticing();
+  else if (action === "toggle-sections") {
+    if (session.results) session.results.showSections = !session.results.showSections;
+    render();
+  } else if (action === "practice-chunk" || action === "practice-again") {
+    const songId = session.results?.songId;
+    const round = el.dataset.round || "";
+    const again = action === "practice-again" ? "&again=1" : "";
+    if (songId && round) go(`#/play/${encodeURIComponent(songId)}/lines?round=${encodeURIComponent(round)}${again}`);
+  } else if (action === "continue") continueLesson();
   else if (action === "confirm-modal") {
     const confirm = session.modal?.onConfirm;
     session.modal = null;

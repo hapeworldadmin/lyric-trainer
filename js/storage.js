@@ -1,7 +1,7 @@
-import { SAMPLE_SONG } from "./sample.js?v=6";
-import { emptyProgress } from "./progress.js?v=6";
-import { sanitizeRun } from "./scores.js?v=6";
-import { clip, songKey, uid } from "./text.js?v=6";
+import { SAMPLE_SONG } from "./sample.js?v=7";
+import { emptyProgress } from "./progress.js?v=7";
+import { sanitizeRun } from "./scores.js?v=7";
+import { clip, songKey, uid } from "./text.js?v=7";
 
 export const STORAGE_KEY = "lyric-trainer-v1";
 
@@ -166,6 +166,20 @@ function cleanSongProgress(row) {
     if (!["fill", "order", "next", "letters", "concert", "sections", "lines"].includes(game)) continue;
     bestByGame[game] = Math.max(0, Math.round(Number(value) || 0));
   }
+  const rounds = {};
+  for (const [id, stat] of Object.entries(row.rounds || {})) {
+    if (!/^[a-z0-9-]+$/i.test(id) || !stat || typeof stat !== "object") continue;
+    rounds[id] = {
+      mistakes: Math.max(0, Math.round(Number(stat.mistakes) || 0)),
+      completed: Boolean(stat.completed),
+      mastered: Boolean(stat.mastered),
+      seen: Math.max(0, Math.round(Number(stat.seen) || 0))
+    };
+  }
+  const chapters = {};
+  for (const id of ["sections", "lines", "next", "concert"]) {
+    if (row.chapters?.[id]) chapters[id] = true;
+  }
   let imported = null;
   if (row.imported && typeof row.imported === "object") {
     imported = {
@@ -181,6 +195,8 @@ function cleanSongProgress(row) {
     bestByGame,
     xp: Math.max(0, Math.round(Number(row.xp) || 0)),
     lineStats,
+    rounds,
+    chapters,
     plays: Math.max(0, Math.round(Number(row.plays) || 0)),
     lastPlayedAt: typeof row.lastPlayedAt === "string" ? row.lastPlayedAt : null,
     imported

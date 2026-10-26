@@ -1,4 +1,4 @@
-import { normalizeAnswer, wordCount } from "./text.js?v=6";
+import { normalizeAnswer, wordCount } from "./text.js?v=7";
 
 const SECTION_WORD = "(?:verse|chorus|pre-?chorus|bridge|intro|outro|hook|refrain|interlude|instrumental|breakdown|drop|spoken|ad-?libs?|part|ending|coda)";
 const SECTION_RE = new RegExp(SECTION_WORD, "i");
@@ -397,8 +397,7 @@ function findChorusSpans(lines) {
     if (key) compact.push({ index, key });
   });
   let best = null;
-  const maxLen = Math.min(8, compact.length);
-  for (let len = maxLen; len >= 2; len -= 1) {
+  for (let len = compact.length; len >= 2; len -= 1) {
     const groups = new Map();
     for (let start = 0; start + len <= compact.length; start += 1) {
       const sig = compact.slice(start, start + len).map((item) => item.key).join("\n");
@@ -415,8 +414,9 @@ function findChorusSpans(lines) {
       }
       if (picked.length < 2) continue;
       const score = len * 100 + picked.length;
-      if (!best || score > best.score) best = { score, spans: picked };
+      if (!best || score > best.score) best = { score, len, spans: picked };
     }
+    if (best?.len === len) break;
   }
   if (!best) return [];
   const ordered = [...best.spans].sort((a, b) => a.start - b.start);
@@ -435,16 +435,10 @@ function paintGaps(lines, sections, gaps) {
   for (const gap of gaps) {
     const length = gap.end - gap.start;
     const afterChorus = gap.start > 0 && sections[gap.start - 1] === "Chorus";
-    if (afterChorus && openingLength > 0 && length < openingLength && length <= 8) {
-      for (let index = gap.start; index < gap.end; index += 1) sections[index] = "Bridge";
-      continue;
-    }
-    let offset = 0;
-    for (const size of chunkSizes(length)) {
-      verse += 1;
-      for (let step = 0; step < size; step += 1) sections[gap.start + offset + step] = `Verse ${verse}`;
-      offset += size;
-    }
+    const label = afterChorus && openingLength > 0 && length < openingLength && length <= 8
+      ? "Bridge"
+      : `Verse ${verse += 1}`;
+    for (let index = gap.start; index < gap.end; index += 1) sections[index] = label;
   }
   return sections.map((label) => label || "Part 1");
 }
