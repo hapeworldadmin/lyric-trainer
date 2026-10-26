@@ -98,6 +98,7 @@ test("webkit paste reads the clipboard inside the click and previews from a past
     await page.getByTestId("paste-clipboard").click();
     const box = page.getByTestId("lyrics");
     await box.waitFor();
+    assert.equal(await page.getByTestId("paste-debug").innerText(), "Error");
     await page.getByTestId("paste-hint").waitFor();
     assert.equal(await page.getByTestId("paste-hint").innerText(), "Press Cmd+V (or long-press, Paste)");
     assert.equal(await page.getByTestId("use-fallback").isHidden(), true);
@@ -122,6 +123,124 @@ test("webkit paste reads the clipboard inside the click and previews from a past
     assert.equal(await page.getByTestId("use-fallback").isHidden(), false);
     await page.getByTestId("use-fallback").click();
     await page.getByTestId("looks-right").waitFor();
+    await context.close();
+  } finally {
+    server.kill();
+    await browser.close();
+  }
+});
+
+test("webkit word order accepts number keys and Enter, and ignores keys in a field", async (t) => {
+  if (!webkit) {
+    t.skip("playwright is not installed");
+    return;
+  }
+  let browser;
+  try {
+    browser = await webkit.launch();
+  } catch (error) {
+    t.skip(`webkit browser is not installed (${error.message})`);
+    return;
+  }
+  const keyboardPort = port + 1;
+  const server = spawn("python3", ["-m", "http.server", String(keyboardPort), "--bind", "127.0.0.1"], {
+    cwd: root,
+    stdio: "ignore"
+  });
+  const wait = () => new Promise((resolve, reject) => {
+    const started = Date.now();
+    const attempt = () => {
+      const socket = net.connect(keyboardPort, "127.0.0.1");
+      socket.on("connect", () => {
+        socket.end();
+        resolve();
+      });
+      socket.on("error", () => {
+        socket.destroy();
+        if (Date.now() - started > 2000) reject(new Error("preview server did not start"));
+        else setTimeout(attempt, 50);
+      });
+    };
+    attempt();
+  });
+  try {
+    await wait();
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await context.newPage();
+    await page.goto(`http://127.0.0.1:${keyboardPort}/#/play/sample-banana-flashlight/order`, { waitUntil: "domcontentloaded" });
+    await page.getByTestId("check").waitFor();
+    assert.equal(await page.getByTestId("next-lyrics").count(), 0);
+    const look = await page.evaluate(() => {
+      const read = (selector) => {
+        const el = document.querySelector(selector);
+        if (!el) return null;
+        const style = getComputedStyle(el);
+        return {
+          color: style.color,
+          size: style.fontSize,
+          weight: style.fontWeight,
+          bg: style.backgroundColor,
+          border: style.borderTopColor,
+          borderStyle: style.borderTopStyle,
+          minHeight: style.minHeight,
+          width: style.width,
+          height: style.height,
+          display: style.display,
+          text: el.textContent
+        };
+      };
+      return {
+        line: read(".target-line"),
+        blank: read(".target-blank"),
+        token: read(".pool .token"),
+        tray: read("[data-testid=tray]"),
+        crumb: read("[data-testid=play-crumb]"),
+        heart: read(".heart"),
+        hint: read(".key-hint"),
+        check: read("[data-testid=check]")
+      };
+    });
+    assert.equal(look.line.color, "rgb(245, 245, 247)");
+    assert.equal(look.line.size, "22px");
+    assert.equal(look.line.weight, "700");
+    assert.equal(look.blank.color, "rgb(139, 111, 255)");
+    assert.equal(look.token.bg, "rgb(31, 31, 40)");
+    assert.equal(look.token.border, "rgb(42, 42, 53)");
+    assert.equal(look.token.size, "17px");
+    assert.equal(look.token.weight, "600");
+    assert.equal(look.token.minHeight, "48px");
+    assert.equal(look.tray.minHeight, "56px");
+    assert.equal(look.tray.borderStyle, "dashed");
+    assert.equal(look.tray.border, "rgb(124, 92, 255)");
+    assert.equal(look.crumb.size, "12px");
+    assert.equal(look.crumb.weight, "600");
+    assert.match(look.crumb.text, /Word order/);
+    assert.equal(look.heart.width, "16px");
+    assert.equal(look.heart.height, "16px");
+    assert.equal(look.heart.color, "rgb(255, 77, 109)");
+    assert.ok(look.hint.display === "inline-flex" || look.hint.display === "flex");
+    assert.equal(look.check.bg, "rgb(139, 111, 255)");
+    await page.evaluate(() => {
+      const badge = document.createElement("div");
+      badge.id = "netlify-drawer";
+      document.body.appendChild(badge);
+    });
+    await page.waitForFunction(() => !document.getElementById("netlify-drawer"));
+
+    await page.keyboard.press("1");
+    await page.waitForTimeout(400);
+    await page.keyboard.press("Enter");
+    await page.locator("#play-note").waitFor();
+    assert.match(await page.locator("#play-note").innerText(), /Place every word first/);
+    assert.equal(await page.getByTestId("feedback").count(), 0);
+
+    await page.goto(`http://127.0.0.1:${keyboardPort}/#/me`, { waitUntil: "domcontentloaded" });
+    const name = page.getByTestId("player-name");
+    await name.waitFor();
+    await name.click();
+    await page.keyboard.press("1");
+    assert.equal(await name.inputValue(), "1");
+    assert.match(page.url(), /#\/me/);
     await context.close();
   } finally {
     server.kill();

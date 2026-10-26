@@ -1,7 +1,9 @@
-import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js?v=6";
+import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js?v=7";
 
 export const MASTER_CORRECT = 2;
+export const ROUND_MISTAKE_LIMIT = 1;
 const GAMES = new Set(["fill", "order", "next", "letters", "concert", "sections", "lines"]);
+const CHAPTER_IDS = ["sections", "lines", "next", "concert"];
 
 export function emptyProgress() {
   return {
@@ -33,6 +35,8 @@ function ensureRow(progress, song) {
       bestByGame: {},
       xp: 0,
       lineStats: {},
+      rounds: {},
+      chapters: {},
       plays: 0,
       lastPlayedAt: null,
       imported: null
@@ -43,6 +47,8 @@ function ensureRow(progress, song) {
   row.artist = song.artist;
   row.bestByGame ||= {};
   row.lineStats ||= {};
+  row.rounds ||= {};
+  row.chapters ||= {};
   return row;
 }
 
@@ -84,8 +90,38 @@ export function songStats(progress, song) {
     lastPlayedAt: row.lastPlayedAt || null,
     lineCount,
     linesMastered,
-    masteryPercent
+    masteryPercent,
+    rounds: { ...(row.rounds || {}) },
+    chapters: { ...(row.chapters || {}) },
+    songMastered: Boolean(row.chapters?.concert) || (row.bestByGame?.concert || 0) > 0
   };
+}
+
+export function recordRoundResult(progress, song, { roundId, mistakes = 0, completed = false }) {
+  if (!roundId || !/^[a-z0-9-]+$/i.test(roundId)) return null;
+  const row = ensureRow(progress, song);
+  const prev = row.rounds[roundId] || { mistakes: 0, completed: false, mastered: false, seen: 0 };
+  const nextMistakes = Math.max(0, Math.round(Number(mistakes) || 0));
+  const mastered = prev.mastered || (Boolean(completed) && nextMistakes <= ROUND_MISTAKE_LIMIT);
+  row.rounds[roundId] = {
+    mistakes: mastered ? Math.min(prev.mastered ? prev.mistakes : nextMistakes, nextMistakes) : nextMistakes,
+    completed: prev.completed || Boolean(completed),
+    mastered,
+    seen: (prev.seen || 0) + 1
+  };
+  return row.rounds[roundId];
+}
+
+export function masteredRoundIds(progress, song) {
+  const key = songKey(song.title, song.artist);
+  const rounds = progress?.songs?.[key]?.rounds || {};
+  return Object.entries(rounds).filter(([, stat]) => stat?.mastered).map(([id]) => id);
+}
+
+export function markChapter(progress, song, gameId) {
+  const row = ensureRow(progress, song);
+  if (CHAPTER_IDS.includes(gameId)) row.chapters[gameId] = true;
+  return row.chapters;
 }
 
 export function recordLineResult(progress, song, { line, correct, xpGain }) {
@@ -153,6 +189,8 @@ export function resetLineMasteryIfChanged(progressByPlayer, title, artist, previ
     const row = progress.songs?.[key];
     if (!row) continue;
     row.lineStats = {};
+    row.rounds = {};
+    row.chapters = {};
     row.imported = null;
   }
 }
@@ -176,6 +214,8 @@ function mergeRows(a, b, title, artist) {
     bestByGame,
     xp: Math.max(a.xp || 0, b.xp || 0),
     lineStats,
+    rounds: { ...(b.rounds || {}), ...(a.rounds || {}) },
+    chapters: { ...(b.chapters || {}), ...(a.chapters || {}) },
     plays: (a.plays || 0) + (b.plays || 0),
     lastPlayedAt: [a.lastPlayedAt, b.lastPlayedAt].filter(Boolean).sort().at(-1) || null,
     imported: a.imported || b.imported || null

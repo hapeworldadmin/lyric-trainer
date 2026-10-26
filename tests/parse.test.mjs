@@ -246,6 +246,55 @@ test("html stanza blocks keep breaks and drop the panel junk", () => {
   assert.equal(parsed.lines.some((line) => /source|songwriter|feedback|listen/i.test(line)), false);
 });
 
+test("a google-shaped paste keeps stanza boundaries and does not split a stanza", () => {
+  const verse1 = [
+    "paper boats along the stair",
+    "counting windows in the rain",
+    "the hallway clock forgot the hour",
+    "we borrowed light from upstairs",
+    "soft shoes on the colder floor",
+    "the kettle knew the way"
+  ];
+  const chorus = [
+    "carry the paper moon upstairs",
+    "leave the quiet in the hall",
+    "spin the silver kitchen light",
+    "we can hear the pictures fall",
+    "hold the banister and laugh",
+    "the ceiling knows our names",
+    "open every other door",
+    "the landing keeps us safe",
+    "say the password to the dark",
+    "we arrive and start again"
+  ];
+  const verse2 = [
+    "morning folded on the chair",
+    "tickets hidden in a book",
+    "the neighbor waved through fog",
+    "we practiced being brave",
+    "a radio forgot the news",
+    "the staircase smelled like rain",
+    "you pointed at the roof"
+  ];
+  const chorusEcho = chorus.map((line, index) => (index % 3 === 0 ? `${line} (${line.split(" ")[0]})` : line));
+  const bridge = ["na na na the landing", "na na na the light", "na na na we stay"];
+  const lines = [...verse1, ...chorus, ...verse2, ...chorusEcho, ...bridge];
+  const expected = [
+    ...verse1.map(() => "Verse 1"),
+    ...chorus.map(() => "Chorus"),
+    ...verse2.map(() => "Verse 2"),
+    ...chorusEcho.map(() => "Chorus"),
+    ...bridge.map(() => "Bridge")
+  ];
+  const parsed = analyzePaste(lines.join("\n"), { detectTitle: false });
+  assert.deepEqual(parsed.sections, expected);
+  const stanza = (block) => `<div>${block.map((line) => `<span>${line}</span>`).join("<br>")}</div>`;
+  const html = [stanza(verse1), stanza(chorus), stanza(verse2), stanza(chorusEcho), stanza(bridge)].join("");
+  const fromHtml = cleanPastedPage(html, { detectTitle: false });
+  assert.deepEqual(fromHtml.lines, lines);
+  assert.deepEqual(fromHtml.sections, expected);
+});
+
 test("find lyrics is only a web search link", () => {
   const url = new URL(searchLyricsUrl("Paper Moonfish", "House Band"));
   assert.equal(url.origin, "https://www.google.com");

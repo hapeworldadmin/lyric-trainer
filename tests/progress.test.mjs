@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { buildLesson } from "../js/games.js";
 import {
   buildExport,
   emptyProgress,
+  masteredRoundIds,
   mergeImport,
   nextStreak,
   recordLineResult,
+  recordRoundResult,
   recordRun,
   resetLineMasteryIfChanged,
   retitleSongProgress,
@@ -115,6 +118,31 @@ test("renaming a song keeps the score and editing lines resets mastery", () => {
   resetLineMasteryIfChanged(players, "Glowstick Goldfish", song.artist, song.lines, ["A brand new invented line", "Another invented line"]);
   assert.equal(songStats(progress, { title: "Glowstick Goldfish", artist: song.artist, lines: ["A brand new invented line", "Another invented line"] }).linesMastered, 0);
   assert.equal(songStats(progress, { title: "Glowstick Goldfish", artist: song.artist, lines: ["A brand new invented line", "Another invented line"] }).bestScore, 50);
+});
+
+test("round mastery persists for the same lyrics and is skipped next time", () => {
+  const mem = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => (mem.has(key) ? mem.get(key) : null),
+    setItem: (key, value) => mem.set(key, String(value))
+  };
+  const state = loadState();
+  const sample = state.songs.find((item) => item.sample);
+  const first = buildLesson(sample.lines, "lines", () => 0.4, sample.sections).find((question) => question.kind === "lines");
+  const repaste = buildLesson([...sample.lines], "lines", () => 0.9, [...sample.sections]).find((question) => question.kind === "lines");
+  assert.equal(repaste.roundId, first.roundId);
+  const progress = state.progress[state.activePlayerId];
+  assert.equal(recordRoundResult(progress, sample, { roundId: first.roundId, mistakes: 1, completed: true }).mastered, true);
+  assert.equal(recordRoundResult(progress, sample, { roundId: "round-b", mistakes: 2, completed: true }).mastered, false);
+  saveState(state);
+  const loaded = loadState();
+  const again = loaded.songs.find((item) => item.id === sample.id);
+  const ids = masteredRoundIds(loaded.progress[loaded.activePlayerId], again);
+  assert.deepEqual(ids, [first.roundId]);
+  const skipped = buildLesson(again.lines, "lines", () => 0.4, again.sections, { skipIds: ids });
+  assert.equal(skipped.some((question) => question.roundId === first.roundId), false);
+  const stored = JSON.stringify(JSON.parse(mem.get("lyric-trainer-v1")).progress);
+  for (const line of SAMPLE_SONG.lines) assert.equal(stored.includes(line), false);
 });
 
 test("saved progress survives a fresh load", () => {
