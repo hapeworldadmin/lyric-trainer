@@ -1,6 +1,6 @@
-import { blip } from "./audio.js?v=5";
-import { readClipboardFromGesture } from "./clipboard.js?v=5";
-import { activeConcertSummary, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=5";
+import { blip } from "./audio.js?v=6";
+import { readClipboardFromGesture } from "./clipboard.js?v=6";
+import { activeConcertSummary, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=6";
 import {
   CONCERT_SECONDS,
   GAMES,
@@ -9,10 +9,11 @@ import {
   firstLessonId,
   gameAvailability,
   isOrderCorrect,
+  judgeOrderTap,
   lessonBonus,
   pointsFor
-} from "./games.js?v=5";
-import { analyzePaste, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=5";
+} from "./games.js?v=6";
+import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=6";
 import {
   addBonusXp,
   buildExport,
@@ -24,10 +25,10 @@ import {
   resetLineMasteryIfChanged,
   retitleSongProgress,
   songStats
-} from "./progress.js?v=5";
-import { SAMPLE_SONG } from "./sample.js?v=5";
-import { createScoreProvider, sanitizeRun } from "./scores.js?v=5";
-import { drawShareCard, shareText } from "./share.js?v=5";
+} from "./progress.js?v=6";
+import { SAMPLE_SONG } from "./sample.js?v=6";
+import { createScoreProvider, sanitizeRun } from "./scores.js?v=6";
+import { drawShareCard, shareText } from "./share.js?v=6";
 import {
   activePlayer,
   activeProgress as progressOf,
@@ -36,8 +37,8 @@ import {
   sampleRecord,
   saveState,
   seedSample
-} from "./storage.js?v=5";
-import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=5";
+} from "./storage.js?v=6";
+import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=6";
 
 const session = {
   state: null,
@@ -179,6 +180,8 @@ async function render() {
   afterRender();
 }
 
+const ACCENTS = ["violet", "coral", "cyan"];
+
 function toneFor(name) {
   if (name === "concerts" || name === "concert") return "concerts";
   if (name === "board") return "board";
@@ -186,11 +189,28 @@ function toneFor(name) {
   return "songs";
 }
 
+function accentForId(concertId) {
+  const index = session.concerts.findIndex((item) => item.id === concertId);
+  return ACCENTS[(index >= 0 ? index : 0) % ACCENTS.length];
+}
+
+function shellAccent() {
+  const route = session.route;
+  if (route.name === "concert") return accentForId(route.concertId);
+  if (route.name === "song" || route.name === "play" || route.name === "edit" || route.name === "results") {
+    const songId = route.songId || session.play?.songId || session.results?.songId;
+    const song = findSong(songId);
+    const concert = song ? concertsForSong(session.concerts, song.title, song.artist)[0] : null;
+    if (concert) return accentForId(concert.id);
+  }
+  return session.concerts[0] ? accentForId(session.concerts[0].id) : "violet";
+}
+
 function shell(body, { play }) {
   const tone = toneFor(session.route.name);
   const tabs = !play && session.route.name !== "results";
   return `
-    <div class="app tone-${tone} ${play ? "is-play" : ""} ${tabs ? "has-tabs" : ""}">
+    <div class="app tone-${tone} accent-${shellAccent()} ${play ? "is-play" : ""} ${tabs ? "has-tabs" : ""}">
       ${play ? "" : topbar()}
       <main>${body}</main>
       ${tabs ? tabbar() : ""}
@@ -240,7 +260,7 @@ function viewHome() {
   const concert = session.concerts[0];
   const summary = concert ? activeConcertSummary(concert, session.state.songs, progressOf(session.state)) : null;
   const hero = concert && summary?.total ? `
-    <header class="hero">
+    <header class="hero accent-${accentForId(concert.id)}">
       <p class="kicker">Next up</p>
       <h1>${escapeHtml(concert.name)}</h1>
       <p class="hero-stat">${summary.mastered}/${summary.total} mastered</p>
@@ -275,7 +295,7 @@ function songCard(song) {
     : `${song.artist}${sample}`;
   return `
     <a class="row" href="#/song/${encodeURIComponent(song.id)}" data-testid="song-card">
-      <span class="tile tile-song" aria-hidden="true">${escapeHtml(initial(song.title))}</span>
+      <span class="tile tile-song accent-${shellAccent()}" aria-hidden="true">${escapeHtml(initial(song.title))}</span>
       <span class="row-main">
         <strong>${escapeHtml(song.title)}</strong>
         <span class="sub" data-testid="mastery">${escapeHtml(detail)}</span>
@@ -500,10 +520,10 @@ function contextHtml(question) {
     if (context.total) bits.push(`line ${context.position} of ${context.total}`);
   }
   const meta = bits.length ? `<p class="context-meta" data-testid="line-context">${escapeHtml(bits.join(" · "))}</p>` : "";
-  const structural = question.kind === "sections" || question.kind === "lines";
-  const showPrevious = context.previous && question.kind !== "next" && !structural;
-  const previous = showPrevious ? `<p class="context-line" data-testid="context-previous">${escapeHtml(context.previous)}</p>` : "";
-  const next = context.next && !structural ? `<p class="context-line" data-testid="context-next">${escapeHtml(context.next)}</p>` : "";
+  const showPrevious = context.previous && question.kind !== "next" && question.kind !== "sections";
+  const previous = showPrevious ? `<p class="context-line is-anchor" data-testid="context-previous">${escapeHtml(context.previous)}</p>` : "";
+  const next = context.next && question.kind !== "sections" && question.kind !== "lines"
+    ? `<p class="context-line" data-testid="context-next">${escapeHtml(context.next)}</p>` : "";
   return { before: `${meta}${previous}`, after: next };
 }
 
@@ -536,14 +556,16 @@ function answerControls(question) {
     const order = ensureOrder();
     const stacked = question.kind === "order" ? "" : " is-stacked";
     const byId = new Map(question.tokens.map((token) => [token.id, token.text]));
-    const chips = (ids, action) => ids.map((id) => `
-      <button class="token" type="button" data-action="${action}" data-token="${escapeHtml(id)}">${escapeHtml(byId.get(id) || "")}</button>
+    const placed = order.arranged.map((id) => `
+      <span class="token is-set${order.justPlaced === id ? " is-placed" : ""}">${escapeHtml(byId.get(id) || "")}</span>
+    `).join("");
+    const pool = order.pool.map((id) => `
+      <button class="token" type="button" data-action="pick-token" data-token="${escapeHtml(id)}">${escapeHtml(byId.get(id) || "")}</button>
     `).join("");
     const empty = question.kind === "sections" ? "The order appears here" : "Your line appears here";
     return `
-      <div class="tray${stacked}" data-testid="tray">${chips(order.arranged, "unpick-token") || `<span class="hint">${empty}</span>`}</div>
-      <div class="pool${stacked}">${chips(order.pool, "pick-token")}</div>
-      <div class="dock"><button class="btn btn-primary" type="button" data-action="check" data-testid="check">Check</button></div>
+      <div class="tray${stacked}" data-testid="tray">${placed || `<span class="hint">${empty}</span>`}</div>
+      <div class="pool${stacked}">${pool}</div>
     `;
   }
   const bank = question.kind === "fill" ? `<div class="choices">${question.choices.map((choice, index) => `
@@ -618,7 +640,7 @@ function viewConcerts() {
       : (concert.label || "Paste lyrics when a song needs them");
     return `
       <a class="row" href="#/concert/${encodeURIComponent(concert.id)}" data-testid="concert-card">
-        <span class="tile tile-concert" aria-hidden="true">${escapeHtml(initial(concert.name))}</span>
+        <span class="tile tile-concert accent-${accentForId(concert.id)}" aria-hidden="true">${escapeHtml(initial(concert.name))}</span>
         <span class="row-main">
           <strong>${escapeHtml(concert.name)}</strong>
           <span class="sub">${escapeHtml(detail)}</span>
@@ -664,7 +686,7 @@ async function viewConcert() {
   const people = participants > 0 ? `<p class="sub" data-testid="participants">${participants} ${playerNoun} ${where}</p>` : "";
   return `
     <section class="screen" data-testid="concert-page">
-      <header class="hero">
+      <header class="hero accent-${accentForId(concert.id)}">
         <a class="back back-on-hero" href="#/concerts">${icon("back")} Concerts</a>
         <p class="kicker">Concert</p>
         <h1>${escapeHtml(concert.name)}</h1>
@@ -1151,13 +1173,13 @@ function submitCurrent(forced = null) {
     if (!play.picked) return;
     correct = play.picked === question.answer;
   } else if (question.kind === "order" || question.kind === "lines" || question.kind === "sections") {
-    const order = ensureOrder();
-    if (order.arranged.length !== question.tokens.length) {
-      const noun = question.kind === "sections" ? "section" : "line";
-      showPlayNote(`Tap every ${noun} into the list.`);
-      return;
+    if (forced?.orderFailed) {
+      correct = false;
+    } else {
+      const order = ensureOrder();
+      if (order.arranged.length !== question.tokens.length) return;
+      correct = isOrderCorrect(question, order.arranged);
     }
-    correct = isOrderCorrect(question, order.arranged);
   } else {
     const typed = document.getElementById("answer-input")?.value || play.typed || "";
     const guess = typed.trim() || (question.kind === "fill" ? play.picked || "" : "");
@@ -1176,7 +1198,7 @@ function submitCurrent(forced = null) {
     play.bestCombo = Math.max(play.bestCombo, play.combo);
   } else {
     play.combo = 0;
-    play.hearts = Math.max(0, play.hearts - 1);
+    if (!forced?.orderFailed) play.hearts = Math.max(0, play.hearts - 1);
   }
   const secondsLeft = play.gameId === "concert" && play.deadline
     ? Math.max(0, (play.deadline - performance.now()) / 1000)
@@ -1549,10 +1571,73 @@ function onSheetPaste(event) {
   if (session.route.name !== "add" || !session.form) return;
   const target = event.target instanceof Element ? event.target : null;
   if (target?.closest("input, textarea") && target.id !== "lyrics") return;
-  const text = event.clipboardData?.getData("text/plain") ?? "";
+  const html = event.clipboardData?.getData("text/html") ?? "";
+  const plain = event.clipboardData?.getData("text/plain") ?? "";
+  const text = choosePasteSource(html, plain);
   if (!String(text).trim()) return;
   event.preventDefault();
   applyPastedText(text);
+}
+
+function paintHearts() {
+  const root = document.querySelector("[data-testid=hearts]");
+  const play = session.play;
+  if (!root || !play) return;
+  root.setAttribute("aria-label", `${play.hearts} hearts left`);
+  root.querySelectorAll(".heart").forEach((heart, index) => {
+    heart.classList.toggle("is-empty", index >= play.hearts);
+  });
+}
+
+function buzz(pattern) {
+  if (typeof navigator.vibrate === "function") navigator.vibrate(pattern);
+}
+
+function motionDelay() {
+  const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+  return media?.matches ? 300 : 300;
+}
+
+function judgePickedToken(button) {
+  const play = session.play;
+  const question = currentQuestion();
+  if (!play || play.locked || play.orderBusy || !question || !button) return;
+  const order = ensureOrder();
+  const id = button.dataset.token;
+  if (!order.pool.includes(id)) return;
+  if (!judgeOrderTap(question, order.arranged, id)) {
+    play.orderBusy = true;
+    play.combo = 0;
+    play.hearts = Math.max(0, play.hearts - 1);
+    paintHearts();
+    button.classList.add("is-reject");
+    buzz(20);
+    blip("bad", session.state.settings.sound);
+    const failed = play.hearts <= 0;
+    window.setTimeout(() => {
+      if (session.play !== play) return;
+      play.orderBusy = false;
+      button.classList.remove("is-reject");
+      if (failed) submitCurrent({ orderFailed: true });
+    }, motionDelay());
+    return;
+  }
+  play.orderBusy = true;
+  button.classList.add("is-accept");
+  buzz(12);
+  blip("ok", session.state.settings.sound);
+  window.setTimeout(() => {
+    if (session.play !== play || play.locked) return;
+    play.orderBusy = false;
+    order.pool = order.pool.filter((item) => item !== id);
+    order.arranged.push(id);
+    order.justPlaced = id;
+    const done = order.arranged.length === question.tokens.length;
+    render();
+    if (done) window.setTimeout(() => {
+      if (session.play === play && !play.locked) submitCurrent({ orderComplete: true });
+    }, motionDelay());
+  }, motionDelay());
 }
 
 function onClick(event) {
@@ -1608,18 +1693,7 @@ function onClick(event) {
     const choice = currentQuestion()?.choices?.[Number(el.dataset.choice)];
     if (choice) submitCurrent({ choice });
   } else if (action === "pick-token") {
-    const order = ensureOrder();
-    const id = el.dataset.token;
-    if (!order.pool.includes(id)) return;
-    order.pool = order.pool.filter((item) => item !== id);
-    order.arranged.push(id);
-    render();
-  } else if (action === "unpick-token") {
-    const order = ensureOrder();
-    const id = el.dataset.token;
-    order.arranged = order.arranged.filter((item) => item !== id);
-    order.pool.push(id);
-    render();
+    judgePickedToken(el);
   } else if (action === "check") submitCurrent();
   else if (action === "continue") continueLesson();
   else if (action === "confirm-modal") {
