@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "note": "Setlist entries are title and artist only. Never put lyrics in this file.",
+  "concerts": [
+    {
+      "id": "lany-soft-world-tour",
+      "name": "LANY Soft World Tour",
+      "setlist": []
+    }
+  ]
+}
