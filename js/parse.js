@@ -1,4 +1,4 @@
-import { normalizeAnswer, wordCount } from "./text.js?v=4";
+import { normalizeAnswer, wordCount } from "./text.js?v=5";
 
 const SECTION_WORD = "(?:verse|chorus|pre-?chorus|bridge|intro|outro|hook|refrain|interlude|instrumental|breakdown|drop|spoken|ad-?libs?|part|ending|coda)";
 const SECTION_RE = new RegExp(SECTION_WORD, "i");

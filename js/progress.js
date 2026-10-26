@@ -1,4 +1,4 @@
-import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js?v=4";
+import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js?v=5";
 
 export const MASTER_CORRECT = 2;
 const GAMES = new Set(["fill", "order", "next", "letters", "concert", "sections", "lines"]);
