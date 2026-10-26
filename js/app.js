@@ -1,5 +1,6 @@
-import { blip } from "./audio.js?v=4";
-import { activeConcertSummary, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=4";
+import { blip } from "./audio.js?v=5";
+import { readClipboardFromGesture } from "./clipboard.js?v=5";
+import { activeConcertSummary, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=5";
 import {
   CONCERT_SECONDS,
   GAMES,
@@ -10,8 +11,8 @@ import {
   isOrderCorrect,
   lessonBonus,
   pointsFor
-} from "./games.js?v=4";
-import { analyzePaste, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=4";
+} from "./games.js?v=5";
+import { analyzePaste, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=5";
 import {
   addBonusXp,
   buildExport,
@@ -23,10 +24,10 @@ import {
   resetLineMasteryIfChanged,
   retitleSongProgress,
   songStats
-} from "./progress.js?v=4";
-import { SAMPLE_SONG } from "./sample.js?v=4";
-import { createScoreProvider, sanitizeRun } from "./scores.js?v=4";
-import { drawShareCard, shareText } from "./share.js?v=4";
+} from "./progress.js?v=5";
+import { SAMPLE_SONG } from "./sample.js?v=5";
+import { createScoreProvider, sanitizeRun } from "./scores.js?v=5";
+import { drawShareCard, shareText } from "./share.js?v=5";
 import {
   activePlayer,
   activeProgress as progressOf,
@@ -35,8 +36,8 @@ import {
   sampleRecord,
   saveState,
   seedSample
-} from "./storage.js?v=4";
-import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=4";
+} from "./storage.js?v=5";
+import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=5";
 
 const session = {
   state: null,
@@ -109,6 +110,7 @@ async function boot() {
   }
   window.addEventListener("hashchange", sync);
   document.addEventListener("click", onClick);
+  document.addEventListener("paste", onSheetPaste);
   document.addEventListener("input", onInput);
   document.addEventListener("submit", onSubmit);
   document.addEventListener("change", onChange);
@@ -339,19 +341,19 @@ function viewPaste() {
     <button class="btn btn-primary" type="button" data-action="confirm-paste" data-testid="looks-right">Looks right</button>
     <button class="btn btn-text" type="button" data-action="retry-paste" data-testid="try-again">Try again</button>
   ` : `
-    ${known ? `<a class="btn btn-text" id="find-lyrics" data-testid="find-lyrics" href="${escapeHtml(find)}" target="_blank" rel="noopener noreferrer">Find lyrics</a>` : ""}
+    ${known ? `<a class="btn btn-secondary" id="find-lyrics" data-testid="find-lyrics" href="${escapeHtml(find)}" target="_blank" rel="noopener noreferrer">Find lyrics</a>` : ""}
     <button class="btn btn-primary" type="button" data-action="paste-clipboard" data-testid="paste-clipboard">Paste</button>
     ${form.fallback ? `
       <label class="field">Lyrics
         <textarea id="lyrics" data-testid="lyrics" spellcheck="false" placeholder="Paste lyrics here.">${escapeHtml(form.raw || "")}</textarea>
       </label>
-      <p class="fine">Clipboard is blocked. Paste the words here, then tap Use this paste.</p>
-      <button class="btn btn-text" type="button" data-action="use-fallback" data-testid="use-fallback">Use this paste</button>
+      <p class="fine" data-testid="paste-hint">Press Cmd+V (or long-press, Paste)</p>
+      <button class="btn btn-text" type="button" data-action="use-fallback" data-testid="use-fallback" ${form.manual ? "" : "hidden"}>Use this paste</button>
     ` : ""}
     <p class="fine">Lyrics you paste never leave this browser.</p>
   `;
   return `
-    <section class="screen">
+    <section class="screen" data-testid="paste-sheet">
       <a class="back" href="${back}">${icon("back")} Back</a>
       <header class="page-head">
         <h1>${escapeHtml(known ? form.title : "Add a song")}</h1>
@@ -851,9 +853,21 @@ function ensureForm() {
   };
 }
 
-function onLyricsInput() {
+function onLyricsInput(event) {
   const lyrics = document.getElementById("lyrics");
   if (!lyrics || !session.form) return;
+  if (session.route.name === "add" && session.form.fallback && !session.form.preview) {
+    session.form.raw = lyrics.value;
+    const button = document.querySelector("[data-testid=use-fallback]");
+    if (event?.inputType === "insertFromPaste" || !lyrics.value.trim()) {
+      session.form.manual = false;
+      if (button) button.hidden = true;
+      return;
+    }
+    session.form.manual = true;
+    if (button) button.hidden = false;
+    return;
+  }
   session.form.raw = lyrics.value;
   const parsed = analyzePaste(lyrics.value, { detectTitle: !(session.form.lockMeta || session.form.rejectDetection) });
   if (parsed.detected && !session.form.titleTouched && !session.form.forceFields && !session.form.lockMeta) {
@@ -966,18 +980,19 @@ function writeSong({ songId, title, artist, lines, sections }) {
   return song;
 }
 
-async function pasteFromClipboard() {
+function showPasteFallback() {
   const form = session.form;
   if (!form) return;
-  try {
-    if (!navigator.clipboard?.readText) throw new Error("unsupported");
-    const text = await navigator.clipboard.readText();
-    applyPastedText(text);
-  } catch {
-    form.fallback = true;
-    form.error = "";
-    render();
-  }
+  form.fallback = true;
+  form.manual = false;
+  form.error = "";
+  render();
+}
+
+function readClipboardNow() {
+  readClipboardFromGesture()
+    .then((text) => applyPastedText(text))
+    .catch(() => showPasteFallback());
 }
 
 function applyPastedText(text) {
@@ -1525,17 +1540,34 @@ function afterRender() {
     });
   }
   updateFindLink();
+  const lyrics = document.getElementById("lyrics");
+  if (session.route.name === "add" && session.form?.fallback && !session.form.preview && lyrics) lyrics.focus();
   startTimer();
 }
 
+function onSheetPaste(event) {
+  if (session.route.name !== "add" || !session.form) return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (target?.closest("input, textarea") && target.id !== "lyrics") return;
+  const text = event.clipboardData?.getData("text/plain") ?? "";
+  if (!String(text).trim()) return;
+  event.preventDefault();
+  applyPastedText(text);
+}
+
 function onClick(event) {
-  const finder = event.target.closest("#find-lyrics");
+  const clickTarget = event.target instanceof Element ? event.target : event.target?.parentElement;
+  if (clickTarget?.closest("[data-action=paste-clipboard]")) {
+    readClipboardNow();
+    return;
+  }
+  const finder = clickTarget?.closest("#find-lyrics");
   if (finder?.dataset.disabled === "true") {
     event.preventDefault();
     showFormError("Add a title and artist first.");
     return;
   }
-  const el = event.target.closest("[data-action]");
+  const el = clickTarget?.closest("[data-action]");
   if (!el) return;
   const action = el.dataset.action;
   if (action === "edit-title") {
@@ -1553,7 +1585,6 @@ function onClick(event) {
     session.form.titleTouched = true;
     render();
   } else if (action === "save-song") saveSong();
-  else if (action === "paste-clipboard") pasteFromClipboard();
   else if (action === "use-fallback") {
     captureForm();
     applyPastedText(session.form?.raw || "");
@@ -1563,6 +1594,8 @@ function onClick(event) {
     session.form.preview = null;
     session.form.error = "";
     session.form.raw = "";
+    session.form.manual = false;
+    session.form.fallback = false;
     render();
   } else if (action === "ask-delete") askDelete(el.dataset.id);
   else if (action === "leave") leaveLesson();
@@ -1660,7 +1693,7 @@ async function copyShare() {
 }
 
 function onInput(event) {
-  if (event.target.id === "lyrics") onLyricsInput();
+  if (event.target.id === "lyrics") onLyricsInput(event);
   if (event.target.id === "title" || event.target.id === "artist") {
     if (session.form) session.form.titleTouched = true;
     updateFindLink();

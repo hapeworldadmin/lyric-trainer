@@ -1,4 +1,4 @@
-import { displayToken, mulberry32, normalizeAnswer, shuffle, tokenize } from "./text.js?v=4";
+import { displayToken, mulberry32, normalizeAnswer, shuffle, tokenize } from "./text.js?v=5";
 
 export const GAMES = [
   { id: "sections", name: "Section order", detail: "Arrange the sections", group: "main" },
