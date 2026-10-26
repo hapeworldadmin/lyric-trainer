@@ -1,4 +1,4 @@
-// Original lyrics written for Lyric Trainer.
+// Original lyrics written for Know the Verse.
 // This is the only song that ships with the app.
 // Do not replace it with lyrics from any real artist.
 
@@ -18,5 +18,19 @@ export const SAMPLE_SONG = {
     "The goldfish said the night was bold",
     "We tucked the light inside a cup",
     "And promised we would wake it up"
+  ],
+  sections: [
+    "Verse",
+    "Verse",
+    "Verse",
+    "Verse",
+    "Chorus",
+    "Chorus",
+    "Chorus",
+    "Chorus",
+    "Bridge",
+    "Bridge",
+    "Outro",
+    "Outro"
   ]
 };

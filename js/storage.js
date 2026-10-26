@@ -1,7 +1,7 @@
-import { SAMPLE_SONG } from "./sample.js";
-import { emptyProgress } from "./progress.js";
-import { sanitizeRun } from "./scores.js";
-import { clip, songKey, uid } from "./text.js";
+import { SAMPLE_SONG } from "./sample.js?v=4";
+import { emptyProgress } from "./progress.js?v=4";
+import { sanitizeRun } from "./scores.js?v=4";
+import { clip, songKey, uid } from "./text.js?v=4";
 
 export const STORAGE_KEY = "lyric-trainer-v1";
 
@@ -38,6 +38,7 @@ export function sampleRecord() {
     title: SAMPLE_SONG.title,
     artist: SAMPLE_SONG.artist,
     lines: [...SAMPLE_SONG.lines],
+    sections: [...(SAMPLE_SONG.sections || [])],
     sample: true,
     createdAt: Date.now(),
     updatedAt: Date.now()
@@ -94,14 +95,30 @@ function hydrate(raw) {
 
 function cleanSong(song) {
   if (!song || typeof song.title !== "string" || typeof song.artist !== "string" || !Array.isArray(song.lines)) return null;
-  const lines = song.lines.filter((line) => typeof line === "string" && line.trim()).map((line) => clip(line, 300)).slice(0, 400);
+  const lines = [];
+  const sections = [];
+  for (let index = 0; index < song.lines.length && lines.length < 400; index += 1) {
+    const line = song.lines[index];
+    if (typeof line !== "string" || !line.trim()) continue;
+    lines.push(clip(line, 300));
+    const label = Array.isArray(song.sections) && typeof song.sections[index] === "string" ? song.sections[index] : "";
+    sections.push(clip(label, 40));
+  }
   if (lines.length < 2) return null;
+  const sample = Boolean(song.sample);
+  const matchesSample = lines.length === SAMPLE_SONG.lines.length && lines.every((line, index) => line === SAMPLE_SONG.lines[index]);
+  if (sample && matchesSample && sections.every((label) => !label) && Array.isArray(SAMPLE_SONG.sections)) {
+    SAMPLE_SONG.sections.forEach((label, index) => {
+      if (index < sections.length) sections[index] = clip(label, 40);
+    });
+  }
   return {
     id: typeof song.id === "string" && song.id ? song.id : uid(),
     title: clip(song.title, 120),
     artist: clip(song.artist, 120),
     lines,
-    sample: Boolean(song.sample),
+    sections,
+    sample,
     createdAt: Number(song.createdAt) || Date.now(),
     updatedAt: Number(song.updatedAt) || Date.now()
   };
@@ -146,7 +163,7 @@ function cleanSongProgress(row) {
   }
   const bestByGame = {};
   for (const [game, value] of Object.entries(row.bestByGame || {})) {
-    if (!["fill", "order", "next", "letters", "concert"].includes(game)) continue;
+    if (!["fill", "order", "next", "letters", "concert", "sections", "lines"].includes(game)) continue;
     bestByGame[game] = Math.max(0, Math.round(Number(value) || 0));
   }
   let imported = null;

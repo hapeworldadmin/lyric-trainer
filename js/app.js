@@ -1,16 +1,17 @@
-import { blip } from "./audio.js";
-import { activeConcertSummary, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js";
+import { blip } from "./audio.js?v=4";
+import { activeConcertSummary, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=4";
 import {
   CONCERT_SECONDS,
   GAMES,
   answersMatch,
   buildLesson,
+  firstLessonId,
   gameAvailability,
   isOrderCorrect,
   lessonBonus,
   pointsFor
-} from "./games.js";
-import { analyzePaste, searchLyricsUrl } from "./parse.js";
+} from "./games.js?v=4";
+import { analyzePaste, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=4";
 import {
   addBonusXp,
   buildExport,
@@ -22,10 +23,10 @@ import {
   resetLineMasteryIfChanged,
   retitleSongProgress,
   songStats
-} from "./progress.js";
-import { SAMPLE_SONG } from "./sample.js";
-import { createScoreProvider, sanitizeRun } from "./scores.js";
-import { drawShareCard, shareText } from "./share.js";
+} from "./progress.js?v=4";
+import { SAMPLE_SONG } from "./sample.js?v=4";
+import { createScoreProvider, sanitizeRun } from "./scores.js?v=4";
+import { drawShareCard, shareText } from "./share.js?v=4";
 import {
   activePlayer,
   activeProgress as progressOf,
@@ -34,8 +35,8 @@ import {
   sampleRecord,
   saveState,
   seedSample
-} from "./storage.js";
-import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js";
+} from "./storage.js?v=4";
+import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=4";
 
 const session = {
   state: null,
@@ -104,7 +105,7 @@ async function boot() {
     session.concertsError = session.concerts.length ? "" : "No concerts are listed in concerts.json yet.";
   } catch {
     session.concerts = [];
-    session.concertsError = "Concerts could not be loaded. Open Lyric Trainer through a local server or GitHub Pages.";
+    session.concertsError = "Concerts could not be loaded. Open Know the Verse through a local server or GitHub Pages.";
   }
   window.addEventListener("hashchange", sync);
   document.addEventListener("click", onClick);
@@ -185,11 +186,12 @@ function toneFor(name) {
 
 function shell(body, { play }) {
   const tone = toneFor(session.route.name);
+  const tabs = !play && session.route.name !== "results";
   return `
-    <div class="app tone-${tone} ${play ? "is-play" : ""}">
+    <div class="app tone-${tone} ${play ? "is-play" : ""} ${tabs ? "has-tabs" : ""}">
       ${play ? "" : topbar()}
       <main>${body}</main>
-      ${play || session.route.name === "results" ? "" : tabbar()}
+      ${tabs ? tabbar() : ""}
     </div>
     ${modalHtml()}
     ${session.toast ? `<p class="toast" role="status">${escapeHtml(session.toast)}</p>` : ""}
@@ -199,19 +201,17 @@ function shell(body, { play }) {
 function topbar() {
   const progress = progressOf(session.state);
   const streak = progress.streak?.count || 0;
+  const xp = progress.totalXp || 0;
+  const pills = [
+    streak > 0 ? `<span class="pill" data-testid="streak-count">${icon("flame")} ${streak} streak</span>` : "",
+    xp > 0 ? `<span class="pill" data-testid="xp-total">${formatScore(xp)} XP</span>` : ""
+  ].join("");
   return `
     <header class="topbar">
-      <a class="brand" href="#/">${mark()} Lyric Trainer</a>
-      <div class="pills">
-        <span class="pill" data-testid="streak-count">${icon("flame")} ${streak} streak</span>
-        <span class="pill" data-testid="xp-total">${formatScore(progress.totalXp)} XP</span>
-      </div>
+      <a class="brand" href="#/">Know the Verse</a>
+      ${pills ? `<div class="pills">${pills}</div>` : ""}
     </header>
   `;
-}
-
-function mark() {
-  return `<span class="mark">${icon("note")}</span>`;
 }
 
 function tabbar() {
@@ -234,100 +234,133 @@ function tabOn(id) {
 }
 
 function viewHome() {
-  const player = activePlayer(session.state);
   const songs = [...session.state.songs].sort((a, b) => b.updatedAt - a.updatedAt);
   const concert = session.concerts[0];
-  const privacy = session.state.settings.privacySeen ? "" : `
-    <aside class="banner">
-      <p>Lyrics you paste never leave this browser.</p>
-      <button class="btn btn-quiet" type="button" data-action="dismiss-privacy">Got it</button>
-    </aside>`;
-  const teaser = concert ? `
-    <section class="band band-concert">
-      <h2>Concerts</h2>
-      <div class="track-list">
-        <a class="track" href="#/concert/${encodeURIComponent(concert.id)}">
-          <span class="num">1</span>
-          <span class="track-main">
-            <strong>${escapeHtml(concert.name)}</strong>
-            <span class="sub">${escapeHtml(concert.label || "Concert")}</span>
-          </span>
-          <span class="status">${concert.setlist.length ? `${concert.setlist.length} songs` : "No setlist"}</span>
-        </a>
-      </div>
-    </section>` : "";
+  const summary = concert ? activeConcertSummary(concert, session.state.songs, progressOf(session.state)) : null;
+  const hero = concert && summary?.total ? `
+    <header class="hero">
+      <p class="kicker">Next up</p>
+      <h1>${escapeHtml(concert.name)}</h1>
+      <p class="hero-stat">${summary.mastered}/${summary.total} mastered</p>
+      <a class="btn btn-hero" href="#/concert/${encodeURIComponent(concert.id)}">Continue</a>
+      <a class="btn btn-text btn-text-on-hero" href="#/add" data-testid="add-song">Add song</a>
+    </header>` : `
+    <header class="page-head">
+      <h1>Songs</h1>
+      <a class="btn btn-primary" href="#/add" data-testid="add-song">Add song</a>
+    </header>`;
   const list = songs.length
-    ? `<div class="track-list" data-testid="song-list">${songs.map((song, index) => songCard(song, index)).join("")}</div>`
+    ? `<div class="rows" data-testid="song-list">${songs.map((song) => songCard(song)).join("")}</div>`
     : `
     <div class="empty">
       <p>No songs on this device yet.</p>
-      <button class="btn btn-ghost" type="button" data-action="restore-sample">Restore the sample song</button>
+      <button class="btn btn-text" type="button" data-action="restore-sample">Restore the sample song</button>
     </div>`;
   return `
     <section class="screen">
-      ${privacy}
-      <header class="mast">
-        <p class="eyebrow">${greeting()}</p>
-        <h1>${escapeHtml(player.name)}</h1>
-        <p class="lede">Short lessons for lyrics you paste yourself.</p>
-        <a class="btn btn-primary" href="#/add" data-testid="add-song">Add song</a>
-      </header>
-      ${teaser}
-      <section class="band band-songs">
-        <h2>Songs</h2>
-        ${list}
-      </section>
+      ${hero}
+      <p class="kicker">Songs</p>
+      ${list}
     </section>
   `;
 }
 
-function songCard(song, index) {
+function songCard(song) {
   const stats = songStats(progressOf(session.state), song);
   const sample = song.sample ? " · Sample" : "";
+  const detail = stats.linesMastered > 0
+    ? `${stats.linesMastered} of ${stats.lineCount} lines mastered`
+    : `${song.artist}${sample}`;
   return `
-    <a class="track" href="#/song/${encodeURIComponent(song.id)}" data-testid="song-card">
-      <span class="num">${index + 1}</span>
-      <span class="track-main">
+    <a class="row" href="#/song/${encodeURIComponent(song.id)}" data-testid="song-card">
+      <span class="tile tile-song" aria-hidden="true">${escapeHtml(initial(song.title))}</span>
+      <span class="row-main">
         <strong>${escapeHtml(song.title)}</strong>
-        <span class="sub">${escapeHtml(song.artist)}${sample}</span>
+        <span class="sub" data-testid="mastery">${escapeHtml(detail)}</span>
       </span>
-      <span class="status" data-testid="mastery">${stats.masteryPercent}%</span>
     </a>
   `;
 }
 
+function initial(value) {
+  const text = String(value || "").trim();
+  return text ? text.slice(0, 1).toUpperCase() : "?";
+}
+
 function viewForm() {
+  if (session.route.name === "add") return viewPaste();
   const form = session.form;
-  const editing = Boolean(form.songId);
-  const parsed = analyzePaste(form.raw || "", { detectTitle: !(form.lockMeta || form.rejectDetection) });
-  const showFields = titleFieldsVisible(parsed);
+  const parsed = analyzePaste(form.raw || "", { detectTitle: false });
   return `
     <section class="screen">
-      <a class="back" href="${editing ? `#/song/${encodeURIComponent(form.songId)}` : "#/"}">${icon("back")} Back</a>
-      <header class="mast">
-        <h1>${editing ? "Edit song" : "Add a song"}</h1>
-        <p class="lede">${form.fromConcert ? "Paste lyrics for this setlist slot. They stay on this device." : "One paste. We tidy section labels and site junk."}</p>
+      <a class="back" href="#/song/${encodeURIComponent(form.songId)}">${icon("back")} Back</a>
+      <header class="page-head">
+        <h1>Edit song</h1>
       </header>
       <div class="stack">
         <label class="field">Lyrics
-          <textarea id="lyrics" data-testid="lyrics" spellcheck="false" placeholder="Paste lyrics here. A first line like Title - Artist is picked up automatically.">${escapeHtml(form.raw || "")}</textarea>
+          <textarea id="lyrics" data-testid="lyrics" spellcheck="false" placeholder="Paste lyrics here.">${escapeHtml(form.raw || "")}</textarea>
         </label>
         <div id="paste-status">${pasteStatusHtml(parsed)}</div>
-        <div id="detect-chip">${detectChipHtml(parsed)}</div>
-        <div id="title-fields" class="stack" ${showFields ? "" : "hidden"}>
-          ${form.fromConcert ? '<p class="hint">Keep this title and artist so the setlist can link.</p>' : ""}
-          <label class="field">Title
-            <input id="title" data-testid="title" type="text" maxlength="120" autocomplete="off" value="${escapeHtml(form.title || "")}">
-          </label>
-          <label class="field">Artist
-            <input id="artist" data-testid="artist" type="text" maxlength="120" autocomplete="off" value="${escapeHtml(form.artist || "")}">
-          </label>
-        </div>
-        <a class="btn btn-ghost" id="find-lyrics" data-testid="find-lyrics" href="#" target="_blank" rel="noopener noreferrer">Find lyrics</a>
-        <p class="hint">Opens a web search in a new tab. Lyric Trainer does not download it.</p>
+        <label class="field">Title
+          <input id="title" data-testid="title" type="text" maxlength="120" autocomplete="off" value="${escapeHtml(form.title || "")}">
+        </label>
+        <label class="field">Artist
+          <input id="artist" data-testid="artist" type="text" maxlength="120" autocomplete="off" value="${escapeHtml(form.artist || "")}">
+        </label>
         <p id="form-error" class="error" role="alert">${escapeHtml(form.error || "")}</p>
         <button class="btn btn-primary" type="button" data-action="save-song" data-testid="save-song">Save song</button>
-        ${editing ? `<button class="btn btn-danger" type="button" data-action="ask-delete" data-id="${escapeHtml(form.songId)}">Delete song</button>` : ""}
+        <button class="btn btn-text btn-danger" type="button" data-action="ask-delete" data-id="${escapeHtml(form.songId)}">Delete song</button>
+        <p class="fine">Lyrics you paste never leave this browser.</p>
+      </div>
+    </section>
+  `;
+}
+
+function viewPaste() {
+  const form = session.form;
+  if (!form) return "";
+  const known = Boolean(form.lockMeta && form.title && form.artist);
+  const back = form.fromConcert ? `#/concert/${encodeURIComponent(form.fromConcert)}` : "#/";
+  const find = searchLyricsUrl(form.title, form.artist);
+  const preview = form.preview;
+  const previewLines = preview ? preview.lines.slice(0, 3).map((line) => `<span>${escapeHtml(line)}</span>`).join("") : "";
+  const metaFields = !known && (form.needMeta || (preview && !preview.detected)) ? `
+    <label class="field">Title
+      <input id="title" data-testid="title" type="text" maxlength="120" autocomplete="off" value="${escapeHtml(form.title || "")}">
+    </label>
+    <label class="field">Artist
+      <input id="artist" data-testid="artist" type="text" maxlength="120" autocomplete="off" value="${escapeHtml(form.artist || "")}">
+    </label>` : "";
+  const body = preview ? `
+    <p class="sub" data-testid="lyric-preview">${preview.lines.length} lines</p>
+    <div class="preview">${previewLines}</div>
+    ${metaFields}
+    <button class="btn btn-primary" type="button" data-action="confirm-paste" data-testid="looks-right">Looks right</button>
+    <button class="btn btn-text" type="button" data-action="retry-paste" data-testid="try-again">Try again</button>
+  ` : `
+    ${known ? `<a class="btn btn-text" id="find-lyrics" data-testid="find-lyrics" href="${escapeHtml(find)}" target="_blank" rel="noopener noreferrer">Find lyrics</a>` : ""}
+    <button class="btn btn-primary" type="button" data-action="paste-clipboard" data-testid="paste-clipboard">Paste</button>
+    ${form.fallback ? `
+      <label class="field">Lyrics
+        <textarea id="lyrics" data-testid="lyrics" spellcheck="false" placeholder="Paste lyrics here.">${escapeHtml(form.raw || "")}</textarea>
+      </label>
+      <p class="fine">Clipboard is blocked. Paste the words here, then tap Use this paste.</p>
+      <button class="btn btn-text" type="button" data-action="use-fallback" data-testid="use-fallback">Use this paste</button>
+    ` : ""}
+    <p class="fine">Lyrics you paste never leave this browser.</p>
+  `;
+  return `
+    <section class="screen">
+      <a class="back" href="${back}">${icon("back")} Back</a>
+      <header class="page-head">
+        <h1>${escapeHtml(known ? form.title : "Add a song")}</h1>
+        ${known ? `<p class="sub">${escapeHtml(form.artist)}</p>` : ""}
+      </header>
+      <div class="stack">
+        ${body}
+        <p id="form-error" class="error" role="alert">${escapeHtml(form.error || "")}</p>
+        ${nextLyricsLink(form.title, form.artist, form.fromConcert)}
       </div>
     </section>
   `;
@@ -366,45 +399,52 @@ function viewSong() {
   const song = findSong(session.route.songId);
   if (!song) return missing("That song is not on this device.", "#/");
   const stats = songStats(progressOf(session.state), song);
-  const availability = gameAvailability(song.lines);
+  const availability = gameAvailability(song.lines, song.sections || []);
   const reasons = {
     fill: "Needs a line with a word to hide",
     order: "Needs a line with at least 3 words",
     next: "Needs at least 3 lines",
     letters: "Needs a line to hint",
-    concert: "Needs a line to perform"
+    concert: "Needs a line to perform",
+    sections: "Needs at least two sections",
+    lines: "Needs a section with two lines"
   };
-  const games = GAMES.map((game) => {
+  const group = (name) => GAMES.filter((game) => game.group === name).map((game) => {
+    const final = game.id === "concert" ? " is-final" : "";
     if (!availability[game.id]) {
-      return `<button class="game ${game.id === "concert" ? "is-concert" : ""}" type="button" disabled><span>${escapeHtml(game.name)}<small>${reasons[game.id]}</small></span></button>`;
+      return `<button class="game${final}" type="button" disabled><span>${escapeHtml(game.name)}<small>${reasons[game.id]}</small></span></button>`;
     }
     return `
-      <a class="game ${game.id === "concert" ? "is-concert" : ""}" data-testid="game-${game.id}" href="#/play/${encodeURIComponent(song.id)}/${game.id}">
+      <a class="game${final}" data-testid="game-${game.id}" href="#/play/${encodeURIComponent(song.id)}/${game.id}">
         <span>${escapeHtml(game.name)}<small>${escapeHtml(game.detail)}</small></span>
       </a>
     `;
   }).join("");
   const concerts = concertsForSong(session.concerts, song.title, song.artist);
   const links = concerts.map((concert) => `<a class="text-link" href="#/concert/${encodeURIComponent(concert.id)}">${escapeHtml(concert.name)}</a>`).join("");
+  const progressLine = stats.linesMastered > 0
+    ? `${stats.linesMastered} of ${stats.lineCount} lines mastered`
+    : "No lines mastered yet";
   return `
     <section class="screen">
-      <a class="back" href="#/">${icon("back")} Songs</a>
-      <header class="mast">
+      <header class="hero hero-song">
+        <a class="back back-on-hero" href="#/">${icon("back")} Songs</a>
         <h1>${escapeHtml(song.title)}</h1>
-        <p class="lede">${escapeHtml(song.artist)}${song.sample ? " · Sample" : ""}</p>
+        <p class="hero-stat">${escapeHtml(song.artist)}${song.sample ? " · Sample" : ""}</p>
       </header>
-      <div class="stat-row">
-        <div class="stat"><strong data-testid="song-mastery">${stats.masteryPercent}%</strong><span>mastery</span></div>
-        <div class="stat"><strong>${stats.linesMastered}/${stats.lineCount}</strong><span>lines mastered</span></div>
-        <div class="stat"><strong>${stats.bestScore ? formatScore(stats.bestScore) : "—"}</strong><span>best score</span></div>
+      <div class="meter-block">
+        <p class="sub" data-testid="song-mastery">${progressLine}</p>
+        ${meter(stats.masteryPercent)}
       </div>
-      ${meter(stats.masteryPercent)}
-      ${links ? `<p class="hint">On the setlist: ${links}</p>` : ""}
-      <h2>Lessons</h2>
-      <div class="game-list">${games}</div>
-      <div class="stack dock">
-        <a class="btn btn-quiet" href="#/edit/${encodeURIComponent(song.id)}">Edit lyrics</a>
-        <button class="btn btn-danger" type="button" data-action="ask-delete" data-id="${escapeHtml(song.id)}">Delete song</button>
+      ${links ? `<p class="sub">On the setlist: ${links}</p>` : ""}
+      <p class="kicker">Lessons</p>
+      <div class="game-list">${group("main")}</div>
+      <p class="kicker">Tricky lines</p>
+      <div class="game-list">${group("warm")}</div>
+      <div class="dock">
+        <a class="btn btn-text" href="#/edit/${encodeURIComponent(song.id)}">Edit lyrics</a>
+        <button class="btn btn-text btn-danger" type="button" data-action="ask-delete" data-id="${escapeHtml(song.id)}">Delete song</button>
+        ${nextLyricsLink(song.title, song.artist, "")}
       </div>
     </section>
   `;
@@ -426,6 +466,7 @@ function viewPlay() {
       <span class="timer-label" id="timer-label">${CONCERT_SECONDS}s</span>
     </div>
   ` : "";
+  const around = contextHtml(question);
   return `
     <section class="screen" data-testid="play">
       <div class="play-top">
@@ -435,13 +476,33 @@ function viewPlay() {
         </div>
         <div class="hearts" data-testid="hearts" aria-label="${play.hearts} hearts left">${hearts}</div>
       </div>
-      <p class="eyebrow">${escapeHtml(play.gameName)}</p>
+      <p class="kicker">${escapeHtml(play.gameName)}</p>
       <p class="ask">${play.index + 1} / ${total}${play.combo >= 2 ? ` · ${play.combo} in a row` : ""}</p>
       ${timer}
+      ${around.before}
       ${questionHtml(question)}
+      ${around.after}
       ${play.feedback ? feedbackHtml(play) : answerControls(question)}
+      ${nextLyricsLink(play.title || findSong(play.songId)?.title, play.artist || findSong(play.songId)?.artist, "")}
     </section>
   `;
+}
+
+function contextHtml(question) {
+  const context = question?.context;
+  if (!context?.total && !context?.rangeLabel) return { before: "", after: "" };
+  const bits = [];
+  if (context.rangeLabel) bits.push(context.rangeLabel);
+  else {
+    if (context.section) bits.push(context.section);
+    if (context.total) bits.push(`line ${context.position} of ${context.total}`);
+  }
+  const meta = bits.length ? `<p class="context-meta" data-testid="line-context">${escapeHtml(bits.join(" · "))}</p>` : "";
+  const structural = question.kind === "sections" || question.kind === "lines";
+  const showPrevious = context.previous && question.kind !== "next" && !structural;
+  const previous = showPrevious ? `<p class="context-line" data-testid="context-previous">${escapeHtml(context.previous)}</p>` : "";
+  const next = context.next && !structural ? `<p class="context-line" data-testid="context-next">${escapeHtml(context.next)}</p>` : "";
+  return { before: `${meta}${previous}`, after: next };
 }
 
 function questionHtml(question) {
@@ -458,6 +519,8 @@ function questionHtml(question) {
   if (question.kind === "letters") {
     return `<p class="hint-line" data-testid="question">${escapeHtml(question.hint)}</p><p class="ask">Type the full line</p>`;
   }
+  if (question.kind === "sections") return `<p class="ask" data-testid="question">Tap the sections in order</p>`;
+  if (question.kind === "lines") return `<p class="ask" data-testid="question">Tap the lines in order</p>`;
   return `<p class="ask" data-testid="question">Tap the words in order</p>`;
 }
 
@@ -467,15 +530,17 @@ function answerControls(question) {
       <button class="choice" type="button" data-action="choose" data-choice="${index}">${escapeHtml(choice)}</button>
     `).join("")}</div>`;
   }
-  if (question.kind === "order") {
+  if (question.kind === "order" || question.kind === "lines" || question.kind === "sections") {
     const order = ensureOrder();
+    const stacked = question.kind === "order" ? "" : " is-stacked";
     const byId = new Map(question.tokens.map((token) => [token.id, token.text]));
     const chips = (ids, action) => ids.map((id) => `
       <button class="token" type="button" data-action="${action}" data-token="${escapeHtml(id)}">${escapeHtml(byId.get(id) || "")}</button>
     `).join("");
+    const empty = question.kind === "sections" ? "The order appears here" : "Your line appears here";
     return `
-      <div class="tray" data-testid="tray">${chips(order.arranged, "unpick-token") || '<span class="hint">Your line appears here</span>'}</div>
-      <div class="pool">${chips(order.pool, "pick-token")}</div>
+      <div class="tray${stacked}" data-testid="tray">${chips(order.arranged, "unpick-token") || `<span class="hint">${empty}</span>`}</div>
+      <div class="pool${stacked}">${chips(order.pool, "pick-token")}</div>
       <div class="dock"><button class="btn btn-primary" type="button" data-action="check" data-testid="check">Check</button></div>
     `;
   }
@@ -511,26 +576,30 @@ function viewResults() {
   const results = session.results;
   if (!results) return "";
   const concerts = concertsForSong(session.concerts, results.title, results.artist)
-    .map((concert) => `<a class="btn btn-quiet" href="#/concert/${encodeURIComponent(concert.id)}">${escapeHtml(concert.name)}</a>`)
+    .map((concert) => `<a class="btn btn-text" href="#/concert/${encodeURIComponent(concert.id)}">${escapeHtml(concert.name)}</a>`)
     .join("");
+  const bits = [];
+  if (results.xp > 0) bits.push(`${results.xp} XP`);
+  if (results.accuracy > 0) bits.push(`${results.accuracy}% accuracy`);
+  if (results.streak > 0) bits.push(`<span data-testid="result-streak">${results.streak}</span> day streak`);
+  const mastered = results.linesMastered > 0
+    ? `${results.linesMastered} of ${results.lineCount} lines mastered`
+    : "No lines mastered yet";
   return `
     <section class="screen">
-      <header class="mast">
-        <p class="eyebrow">${results.newBest ? "New best" : "Lesson complete"}</p>
+      <header class="page-head">
+        <p class="kicker">${results.newBest ? "New best" : "Lesson complete"}</p>
         <h1 data-testid="final-score">${formatScore(results.score)}</h1>
-        <p class="lede">${escapeHtml(results.title)} · ${escapeHtml(results.artist)}</p>
+        <p class="sub">${escapeHtml(results.title)} · ${escapeHtml(results.artist)}</p>
       </header>
-      <div class="stat-row">
-        <div class="stat"><strong>${results.xp}</strong><span>XP earned</span></div>
-        <div class="stat"><strong>${results.accuracy}%</strong><span>accuracy</span></div>
-        <div class="stat"><strong data-testid="result-streak">${results.streak}</strong><span>day streak</span></div>
-      </div>
-      <p class="hint">${results.linesMastered} of ${results.lineCount} lines mastered · ${results.masteryPercent}% mastery</p>
-      <div class="stack">
-        <button class="btn btn-gold" type="button" data-action="share-results" data-testid="share-score">Share my score</button>
-        <a class="btn btn-quiet" href="#/play/${encodeURIComponent(results.songId)}/${results.gameId}">Practice again</a>
-        <a class="btn btn-ghost" href="#/song/${encodeURIComponent(results.songId)}">Back to song</a>
+      ${bits.length ? `<p class="sub">${bits.join(" · ")}</p>` : `<p class="sub">Finish another round when you are ready.</p>`}
+      <p class="sub">${mastered}</p>
+      <div class="dock">
+        <button class="btn btn-primary" type="button" data-action="share-results" data-testid="share-score">Share my score</button>
+        <a class="btn btn-text" href="#/play/${encodeURIComponent(results.songId)}/${results.gameId}">Practice again</a>
+        <a class="btn btn-text" href="#/song/${encodeURIComponent(results.songId)}">Back to song</a>
         ${concerts}
+        ${nextLyricsLink(results.title, results.artist, "")}
       </div>
     </section>
   `;
@@ -540,28 +609,28 @@ function viewConcerts() {
   if (session.concertsError && !session.concerts.length) {
     return `<section class="screen"><h1>Concerts</h1><p class="empty">${escapeHtml(session.concertsError)}</p></section>`;
   }
-  const cards = session.concerts.map((concert, index) => {
+  const cards = session.concerts.map((concert) => {
     const summary = activeConcertSummary(concert, session.state.songs, progressOf(session.state));
-    const progressLabel = summary.total ? `${summary.mastered}/${summary.total}` : "No setlist";
+    const detail = summary.mastered > 0
+      ? `${summary.mastered} of ${summary.total} songs mastered`
+      : (concert.label || "Paste lyrics when a song needs them");
     return `
-      <a class="track" href="#/concert/${encodeURIComponent(concert.id)}" data-testid="concert-card">
-        <span class="num">${index + 1}</span>
-        <span class="track-main">
+      <a class="row" href="#/concert/${encodeURIComponent(concert.id)}" data-testid="concert-card">
+        <span class="tile tile-concert" aria-hidden="true">${escapeHtml(initial(concert.name))}</span>
+        <span class="row-main">
           <strong>${escapeHtml(concert.name)}</strong>
-          <span class="sub">${escapeHtml(concert.label || "Concert")}</span>
+          <span class="sub">${escapeHtml(detail)}</span>
         </span>
-        <span class="status">${progressLabel}</span>
       </a>
     `;
   }).join("");
   return `
     <section class="screen">
-      <header class="mast">
-        <p class="eyebrow">Setlists</p>
+      <header class="page-head">
         <h1>Concerts</h1>
-        <p class="lede">A concert is a folder of song titles. Paste lyrics in the app when a slot needs them.</p>
       </header>
-      <div class="track-list">${cards || '<p class="empty">No concerts yet.</p>'}</div>
+      <p class="sub">A concert is a folder of song titles. Paste lyrics here when a slot needs them.</p>
+      <div class="rows">${cards || '<p class="empty">No concerts yet.</p>'}</div>
     </section>
   `;
 }
@@ -579,62 +648,55 @@ async function viewConcert() {
   const board = leaderboardFromSongScores(scores, concert.setlist);
   const playerNoun = participants === 1 ? "player" : "players";
   const where = provider.source === "device" ? "on this device" : "on the shared board";
-  const fraction = summary.total ? `${summary.mastered}/${summary.total}` : "—";
-  const score = summary.total ? formatScore(summary.score) : "—";
+  const masteredLine = summary.total ? `${summary.mastered}/${summary.total} mastered` : "No setlist posted yet";
   const setlist = summary.total ? summary.slots.map((slot) => setlistRow(concert, slot)).join("") : `
-    <div class="panel">
-      <h2>Setlist not posted</h2>
-      <p>Add title and artist pairs to <strong>concerts.json</strong>. Leave lyrics out of that file and paste them here when you want to practice.</p>
-    </div>
+    <p class="empty">Add title and artist pairs to concerts.json. Leave lyrics out of that file.</p>
   `;
   const rows = board.length ? board.map((row, index) => `
-    <article class="track">
-      <span class="num">${index + 1}</span>
-      <div class="track-main"><strong>${escapeHtml(row.playerName)}</strong><span class="sub">${row.played} of ${row.total} scored</span></div>
-      <span class="status score">${formatScore(row.score)}</span>
+    <article class="set-row">
+      <span class="set-num">${index + 1}</span>
+      <div class="row-main"><strong>${escapeHtml(row.playerName)}</strong><span class="sub">${row.played} of ${row.total} scored</span></div>
+      <span class="sub">${formatScore(row.score)}</span>
     </article>
   `).join("") : `<p class="empty">No scores on this concert yet.</p>`;
+  const people = participants > 0 ? `<p class="sub" data-testid="participants">${participants} ${playerNoun} ${where}</p>` : "";
   return `
     <section class="screen" data-testid="concert-page">
-      <a class="back" href="#/concerts">${icon("back")} Concerts</a>
-      <header class="mast">
-        <p class="eyebrow">Concert</p>
+      <header class="hero">
+        <a class="back back-on-hero" href="#/concerts">${icon("back")} Concerts</a>
+        <p class="kicker">Concert</p>
         <h1>${escapeHtml(concert.name)}</h1>
-        ${concert.label ? `<p class="lede" data-testid="concert-label">${escapeHtml(concert.label)}</p>` : ""}
-        ${concert.source ? `<p class="hint"><a class="text-link" data-testid="concert-source" href="${escapeHtml(concert.source)}" target="_blank" rel="noopener noreferrer">Source setlist</a></p>` : ""}
+        ${concert.label ? `<p class="hero-stat" data-testid="concert-label">${escapeHtml(concert.label)}</p>` : ""}
+        <p class="hero-stat" data-testid="concert-mastered">${masteredLine}</p>
+        ${summary.total ? meter(summary.total ? Math.round((summary.mastered / summary.total) * 100) : 0) : ""}
+        ${concert.source ? `<p class="hero-stat"><a class="text-link" data-testid="concert-source" href="${escapeHtml(concert.source)}" target="_blank" rel="noopener noreferrer">Source setlist</a></p>` : ""}
       </header>
-      <div class="stat-grid">
-        <div class="stat"><strong data-testid="concert-mastered">${fraction}</strong><span>songs mastered</span></div>
-        <div class="stat"><strong data-testid="concert-score">${score}</strong><span>your score</span></div>
-        <div class="stat"><strong data-testid="participants">${participants}</strong><span>${playerNoun} ${where}</span></div>
-      </div>
-      <h2>Setlist</h2>
-      <div class="track-list" data-testid="setlist">${setlist}</div>
-      <h2>Leaderboard</h2>
+      ${summary.score > 0 ? `<p class="sub" data-testid="concert-score">Your score ${formatScore(summary.score)}</p>` : ""}
+      ${people}
+      ${nextLyricsLink("", "", concert.id)}
+      <p class="kicker">Setlist</p>
+      <div data-testid="setlist">${setlist}</div>
+      <p class="kicker">Leaderboard</p>
       <p class="footnote" data-testid="leaderboard-source">${escapeHtml(provider.sourceLabel)}. A shared board can plug in later with name, concert, title, artist, and score.</p>
-      <div class="track-list" data-testid="concert-board">${rows}</div>
-      ${summary.score > 0 ? `<div class="dock"><button class="btn btn-gold" type="button" data-action="share-concert" data-id="${escapeHtml(concert.id)}">Share concert score</button></div>` : ""}
+      <div data-testid="concert-board">${rows}</div>
+      ${summary.score > 0 ? `<div class="dock"><button class="btn btn-primary" type="button" data-action="share-concert" data-id="${escapeHtml(concert.id)}">Share concert score</button></div>` : ""}
     </section>
   `;
 }
 
 function setlistRow(concert, slot) {
-  const action = slot.status === "needs-lyrics"
-    ? `<a class="text-link" data-testid="paste-lyrics" href="#/add?title=${encodeURIComponent(slot.title)}&artist=${encodeURIComponent(slot.artist)}&concert=${encodeURIComponent(concert.id)}">Paste lyrics</a>`
-    : `<a class="text-link" href="#/song/${encodeURIComponent(slot.songId)}">Practice</a>`;
+  const href = slot.status === "needs-lyrics"
+    ? `#/add?title=${encodeURIComponent(slot.title)}&artist=${encodeURIComponent(slot.artist)}&concert=${encodeURIComponent(concert.id)}`
+    : `#/song/${encodeURIComponent(slot.songId)}`;
   const status = slot.status === "needs-lyrics"
-    ? `<span class="status" data-testid="needs-lyrics">Needs lyrics</span>`
-    : `<span class="status">${slot.masteryPercent}%</span>`;
+    ? `<span class="pill-need" data-testid="needs-lyrics">Needs lyrics</span>`
+    : `<span class="sub">${slot.linesMastered > 0 ? `${slot.linesMastered}/${slot.lineCount}` : "Ready"}</span>`;
   return `
-    <article class="track" data-testid="setlist-slot">
-      <span class="num">${slot.index + 1}</span>
-      <div class="track-main">
-        <strong>${escapeHtml(slot.title)}</strong>
-        <span class="sub">${escapeHtml(slot.artist)}</span>
-        ${action}
-      </div>
+    <a class="set-row" data-testid="setlist-slot" href="${href}">
+      <span class="set-num">${slot.index + 1}</span>
+      <span class="row-main"><strong>${escapeHtml(slot.title)}</strong></span>
       ${status}
-    </article>
+    </a>
   `;
 }
 
@@ -649,25 +711,25 @@ async function viewBoard() {
     return concert.setlist.some((slot) => songsMatch(slot.title, slot.artist, run.songTitle, run.songArtist));
   }).sort((a, b) => b.score - a.score || b.createdAt.localeCompare(a.createdAt)).slice(0, 30);
   const rows = visible.length ? visible.map((run, index) => `
-    <article class="track" data-testid="board-row">
-      <span class="num">${index + 1}</span>
-      <div class="track-main">
+    <article class="set-row" data-testid="board-row">
+      <span class="set-num">${index + 1}</span>
+      <div class="row-main">
         <strong>${escapeHtml(run.playerName)}</strong>
-        <span class="sub">${escapeHtml(run.songTitle)} · ${escapeHtml(run.songArtist)} · ${escapeHtml(gameName(run.gameId))}</span>
+        <span class="sub">${escapeHtml(run.songTitle)} · ${escapeHtml(gameName(run.gameId))}</span>
       </div>
-      <span class="status score">${formatScore(run.score)}</span>
+      <span class="sub">${formatScore(run.score)}</span>
     </article>
   `).join("") : `<p class="empty">Finish a lesson to post a score on this device.</p>`;
   return `
     <section class="screen">
-      <header class="mast">
-        <p class="eyebrow">${escapeHtml(provider.sourceLabel)}</p>
+      <header class="page-head">
+        <p class="kicker">${escapeHtml(provider.sourceLabel)}</p>
         <h1>Leaderboard</h1>
       </header>
       <div class="filters">${filters.map((filter) => `
         <button type="button" data-action="filter-board" data-concert="${escapeHtml(filter.id)}" aria-pressed="${filter.id === selected ? "true" : "false"}">${escapeHtml(filter.name)}</button>
       `).join("")}</div>
-      <div class="track-list" data-testid="board">${rows}</div>
+      <div data-testid="board">${rows}</div>
     </section>
   `;
 }
@@ -695,45 +757,44 @@ function viewMe() {
       <article class="player${active ? " is-active" : ""}">
         <div>
           <strong>${escapeHtml(item.name)}</strong>
-          <span class="sub">${formatScore(state.progress[item.id]?.totalXp || 0)} XP</span>
+          <span class="sub">${(state.progress[item.id]?.totalXp || 0) > 0 ? `${formatScore(state.progress[item.id].totalXp)} XP` : "No score yet"}</span>
         </div>
-        <div class="row">
-          ${active ? "" : `<button class="btn btn-quiet btn-small" type="button" data-action="switch-player" data-id="${escapeHtml(item.id)}">Play as</button>`}
-          <button class="btn btn-quiet btn-small" type="button" data-action="start-rename" data-id="${escapeHtml(item.id)}">Rename</button>
-          <button class="btn btn-quiet btn-small" type="button" data-action="ask-delete-player" data-id="${escapeHtml(item.id)}">Remove</button>
+        <div class="row-actions">
+          ${active ? "" : `<button class="btn btn-text btn-small" type="button" data-action="switch-player" data-id="${escapeHtml(item.id)}">Play as</button>`}
+          <button class="btn btn-text btn-small" type="button" data-action="start-rename" data-id="${escapeHtml(item.id)}">Rename</button>
+          <button class="btn btn-text btn-small" type="button" data-action="ask-delete-player" data-id="${escapeHtml(item.id)}">Remove</button>
         </div>
       </article>
     `;
   }).join("");
+  const facts = [];
+  if ((progress.totalXp || 0) > 0) facts.push(`${formatScore(progress.totalXp)} XP`);
+  if ((progress.streak?.count || 0) > 0) facts.push(`${progress.streak.count} day streak`);
+  if (practiced > 0) facts.push(`${practiced} songs scored`);
   return `
     <section class="screen">
-      <header class="mast">
-        <p class="eyebrow">This device</p>
+      <header class="page-head">
         <h1>${escapeHtml(player.name)}</h1>
       </header>
-      <div class="stat-row">
-        <div class="stat"><strong>${formatScore(progress.totalXp)}</strong><span>total XP</span></div>
-        <div class="stat"><strong>${progress.streak?.count || 0}</strong><span>day streak</span></div>
-        <div class="stat"><strong>${practiced}</strong><span>songs scored</span></div>
-      </div>
-      <p class="hint">Songs are shared on this device. Scores, streaks, and XP belong to the active player.</p>
-      <h2>Players</h2>
+      <p class="sub">${facts.length ? facts.join(" · ") : "Finish a lesson to start a score."}</p>
+      <p class="fine">Songs are shared on this device. Scores, streaks, and XP belong to the active player.</p>
+      <p class="kicker">Players</p>
       <form id="player-form" class="stack">
         <label class="field">New player
           <input id="player-name" data-testid="player-name" type="text" maxlength="40" placeholder="Name" autocomplete="off">
         </label>
         <button class="btn btn-primary" type="submit">Add player</button>
       </form>
-      <div class="track-list">${players}</div>
-      <h2>Progress file</h2>
-      <p class="hint">Export is scores, mastery counts, and streaks only. It does not include lyrics.</p>
+      <div>${players}</div>
+      <p class="kicker">Progress file</p>
+      <p class="sub">Export is scores, mastery counts, and streaks only. It does not include lyrics.</p>
       <div class="stack">
-        <button class="btn btn-gold" type="button" data-action="export-progress" data-testid="export-progress">Export progress</button>
-        <button class="btn btn-ghost" type="button" data-action="pick-import" data-testid="import-progress">Import progress</button>
+        <button class="btn btn-primary" type="button" data-action="export-progress" data-testid="export-progress">Export progress</button>
+        <button class="btn btn-text" type="button" data-action="pick-import" data-testid="import-progress">Import progress</button>
         <input id="import-file" type="file" accept="application/json,.json" hidden>
-        <button class="btn btn-ghost" type="button" data-action="toggle-sound">${state.settings.sound ? "Sound on" : "Sound off"}</button>
-        <button class="btn btn-ghost" type="button" data-action="restore-sample">Restore sample song</button>
-        <button class="btn btn-danger" type="button" data-action="ask-erase">Erase everything on this device</button>
+        <button class="btn btn-text" type="button" data-action="toggle-sound">${state.settings.sound ? "Sound on" : "Sound off"}</button>
+        <button class="btn btn-text" type="button" data-action="restore-sample">Restore sample song</button>
+        <button class="btn btn-text btn-danger" type="button" data-action="ask-erase">Erase everything on this device</button>
       </div>
     </section>
   `;
@@ -764,8 +825,11 @@ function ensureForm() {
       songId: song.id,
       title: song.title,
       artist: song.artist,
-      raw: song.lines.join("\n"),
-      fromConcert: ""
+      raw: draftLyrics(song.lines, song.sections),
+      fromConcert: "",
+      preview: null,
+      fallback: false,
+      needMeta: false
     };
     return;
   }
@@ -780,7 +844,10 @@ function ensureForm() {
     title: route.params.title || "",
     artist: route.params.artist || "",
     raw: "",
-    fromConcert: route.params.concert || ""
+    fromConcert: route.params.concert || "",
+    preview: null,
+    fallback: false,
+    needMeta: false
   };
 }
 
@@ -835,60 +902,153 @@ function captureForm() {
 function saveSong() {
   captureForm();
   const form = session.form;
-  const parsed = analyzePaste(form.raw, { detectTitle: !(form.lockMeta || form.rejectDetection) });
-  const showFields = titleFieldsVisible(parsed);
-  const title = clip(showFields ? form.title : parsed.title, 120);
-  const artist = clip(showFields ? form.artist : parsed.artist, 120);
-  const lines = parsed.lines.map((line) => clip(line, 300)).filter(Boolean).slice(0, 400);
-  if (!normalizeAnswer(title) || !normalizeAnswer(artist)) {
-    form.error = "Add a title and an artist.";
-    if (!showFields) form.forceFields = true;
-    if (!showFields) render();
-    else showFormError(form.error);
+  const parsed = analyzePaste(form.raw, { detectTitle: false });
+  const packed = packLines(parsed);
+  const title = clip(form.title, 120);
+  const artist = clip(form.artist, 120);
+  const song = writeSong({ songId: form.songId, title, artist, lines: packed.lines, sections: packed.sections });
+  if (song?.error) {
+    form.error = song.error;
+    showFormError(song.error);
     return;
   }
-  if (lines.length < 2) {
-    form.error = "Keep at least two lyric lines.";
-    showFormError(form.error);
-    return;
+  persist();
+  session.form = null;
+  armToast("Saved on this device.");
+  go(`#/song/${encodeURIComponent(song.id)}`);
+}
+
+function packLines(parsed) {
+  const lines = [];
+  const sections = [];
+  for (let index = 0; index < parsed.lines.length && lines.length < 400; index += 1) {
+    const line = clip(parsed.lines[index], 300);
+    if (!line) continue;
+    lines.push(line);
+    sections.push(clip(parsed.sections?.[index] || "", 40));
   }
-  form.error = "";
+  return { lines, sections };
+}
+
+function writeSong({ songId, title, artist, lines, sections }) {
+  if (!normalizeAnswer(title) || !normalizeAnswer(artist)) return { error: "Add a title and an artist." };
+  if (lines.length < 2) return { error: "Keep at least two lyric lines." };
   const state = session.state;
   const existing = state.songs.find((song) => songKey(song.title, song.artist) === songKey(title, artist));
-  let song;
-  if (form.songId) {
-    song = findSong(form.songId);
-    if (!song) return go("#/");
-    if (existing && existing.id !== song.id) {
-      showFormError("Another saved song already uses that title and artist.");
-      return;
-    }
+  if (songId) {
+    const song = findSong(songId);
+    if (!song) return { error: "That song is not on this device." };
+    if (existing && existing.id !== song.id) return { error: "Another saved song already uses that title and artist." };
     const previousLines = [...song.lines];
     const oldTitle = song.title;
     const oldArtist = song.artist;
     song.title = title;
     song.artist = artist;
     song.lines = lines;
+    song.sections = sections;
     song.updatedAt = Date.now();
     if (song.sample && (oldTitle !== title || oldArtist !== artist || previousLines.join("\n") !== lines.join("\n"))) song.sample = false;
     retitleSongProgress(state.progress, oldTitle, oldArtist, title, artist);
     resetLineMasteryIfChanged(state.progress, title, artist, previousLines, lines);
-  } else if (existing) {
+    return song;
+  }
+  if (existing) {
     const previousLines = [...existing.lines];
     existing.lines = lines;
+    existing.sections = sections;
     existing.updatedAt = Date.now();
     if (existing.sample && previousLines.join("\n") !== lines.join("\n")) existing.sample = false;
     resetLineMasteryIfChanged(state.progress, existing.title, existing.artist, previousLines, lines);
-    song = existing;
-  } else {
-    song = { id: uid(), title, artist, lines, sample: false, createdAt: Date.now(), updatedAt: Date.now() };
-    state.songs.push(song);
+    return existing;
+  }
+  const song = { id: uid(), title, artist, lines, sections, sample: false, createdAt: Date.now(), updatedAt: Date.now() };
+  state.songs.push(song);
+  return song;
+}
+
+async function pasteFromClipboard() {
+  const form = session.form;
+  if (!form) return;
+  try {
+    if (!navigator.clipboard?.readText) throw new Error("unsupported");
+    const text = await navigator.clipboard.readText();
+    applyPastedText(text);
+  } catch {
+    form.fallback = true;
+    form.error = "";
+    render();
+  }
+}
+
+function applyPastedText(text) {
+  const form = session.form;
+  if (!form) return;
+  const parsed = cleanPastedPage(text, {
+    detectTitle: !form.lockMeta,
+    title: form.lockMeta ? form.title : "",
+    artist: form.lockMeta ? form.artist : ""
+  });
+  form.raw = text;
+  if (parsed.lines.length < 2) {
+    form.preview = null;
+    form.fallback = true;
+    form.error = "That paste did not include enough lyric lines.";
+    render();
+    return;
+  }
+  form.preview = parsed;
+  form.error = "";
+  form.fallback = false;
+  if (!form.lockMeta && parsed.detected) {
+    form.title = parsed.title || "";
+    form.artist = parsed.artist || "";
+    form.needMeta = false;
+  } else if (!form.lockMeta && (!normalizeAnswer(form.title) || !normalizeAnswer(form.artist))) {
+    form.needMeta = true;
+  }
+  render();
+}
+
+function confirmPaste() {
+  const form = session.form;
+  if (!form?.preview) return;
+  captureForm();
+  const packed = packLines(form.preview);
+  const title = clip(form.lockMeta ? form.title : (form.title || form.preview.title), 120);
+  const artist = clip(form.lockMeta ? form.artist : (form.artist || form.preview.artist), 120);
+  const song = writeSong({ songId: null, title, artist, lines: packed.lines, sections: packed.sections });
+  if (song?.error) {
+    form.error = song.error;
+    form.needMeta = song.error.startsWith("Add a title");
+    showFormError(song.error);
+    if (form.needMeta) render();
+    return;
   }
   persist();
-  const dest = form.fromConcert ? `#/concert/${encodeURIComponent(form.fromConcert)}` : `#/song/${encodeURIComponent(song.id)}`;
+  const lesson = firstLessonId(song.lines, song.sections);
   session.form = null;
   armToast("Saved on this device.");
-  go(dest);
+  go(`#/play/${encodeURIComponent(song.id)}/${lesson}`);
+}
+
+function nextLyricsLink(title, artist, concertId) {
+  const ids = [];
+  if (concertId) ids.push(concertId);
+  if (title && artist) {
+    for (const concert of concertsForSong(session.concerts, title, artist)) {
+      if (!ids.includes(concert.id)) ids.push(concert.id);
+    }
+  }
+  for (const id of ids) {
+    const concert = session.concerts.find((item) => item.id === id);
+    if (!concert) continue;
+    const summary = activeConcertSummary(concert, session.state.songs, progressOf(session.state));
+    const slot = summary.slots.find((item) => item.status === "needs-lyrics" && !(title && artist && songsMatch(item.title, item.artist, title, artist)));
+    if (!slot) continue;
+    const href = `#/add?title=${encodeURIComponent(slot.title)}&artist=${encodeURIComponent(slot.artist)}&concert=${encodeURIComponent(concert.id)}`;
+    return `<a class="btn btn-text" data-testid="next-lyrics" href="${href}">Next song needing lyrics</a>`;
+  }
+  return "";
 }
 
 function showFormError(message) {
@@ -904,14 +1064,14 @@ function ensurePlay() {
     go("#/");
     return false;
   }
-  if (!gameAvailability(song.lines)[game.id]) {
+  if (!gameAvailability(song.lines, song.sections || [])[game.id]) {
     armToast("That game needs more lines in this song.");
     go(`#/song/${encodeURIComponent(song.id)}`);
     return false;
   }
   const key = `${song.id}:${game.id}`;
   if (session.play?.key === key) return true;
-  const questions = buildLesson(song.lines, game.id);
+  const questions = buildLesson(song.lines, game.id, Math.random, song.sections || []);
   if (!questions.length) {
     armToast("That game needs more lines in this song.");
     go(`#/song/${encodeURIComponent(song.id)}`);
@@ -975,10 +1135,11 @@ function submitCurrent(forced = null) {
     play.picked = forced?.choice ?? play.picked;
     if (!play.picked) return;
     correct = play.picked === question.answer;
-  } else if (question.kind === "order") {
+  } else if (question.kind === "order" || question.kind === "lines" || question.kind === "sections") {
     const order = ensureOrder();
     if (order.arranged.length !== question.tokens.length) {
-      showPlayNote("Tap every word into the line.");
+      const noun = question.kind === "sections" ? "section" : "line";
+      showPlayNote(`Tap every ${noun} into the list.`);
       return;
     }
     correct = isOrderCorrect(question, order.arranged);
@@ -1010,9 +1171,12 @@ function submitCurrent(forced = null) {
   play.score += points.score;
   recordLineResult(progressOf(session.state), song, { line: question.line, correct, xpGain: points.xp });
   persist();
+  const arranged = question.tokens
+    ? question.tokens.map((token) => token.text).join(question.kind === "order" ? " " : "\n")
+    : question.line;
   play.feedback = {
     correct,
-    answer: question.line,
+    answer: arranged,
     xp: points.xp,
     timeout: Boolean(forced?.timeout)
   };
@@ -1332,9 +1496,9 @@ function modalHtml() {
     ${modal.share.url ? `<img class="share-preview" alt="Score card" src="${modal.share.url}">` : ""}
     <p class="share-text">${escapeHtml(modal.share.text)}</p>
     <p id="copy-status" class="hint"></p>
-    <div class="row">
-      <button class="btn btn-quiet" type="button" data-action="copy-share">Copy text</button>
-      ${modal.share.url ? `<a class="btn btn-gold" href="${modal.share.url}" download="lyric-trainer-score.png">Save image</a>` : ""}
+    <div class="stack">
+      <button class="btn btn-text" type="button" data-action="copy-share">Copy text</button>
+      ${modal.share.url ? `<a class="btn btn-primary" href="${modal.share.url}" download="lyric-trainer-score.png">Save image</a>` : ""}
     </div>
   ` : `<p>${escapeHtml(modal.body || "")}</p>`;
   return `
@@ -1342,9 +1506,9 @@ function modalHtml() {
       <div class="modal-card">
         <h2>${escapeHtml(modal.title || "")}</h2>
         ${share}
-        <div class="row">
-          ${modal.confirmLabel === "Close" ? "" : `<button class="btn btn-quiet" type="button" data-action="cancel-modal">Back</button>`}
-          <button class="btn ${modal.danger ? "btn-danger" : "btn-primary"}" type="button" data-action="confirm-modal">${escapeHtml(modal.confirmLabel || "OK")}</button>
+        <div class="stack">
+          ${modal.confirmLabel === "Close" ? "" : `<button class="btn btn-text" type="button" data-action="cancel-modal">Back</button>`}
+          <button class="btn ${modal.danger ? "btn-text btn-danger" : "btn-primary"}" type="button" data-action="confirm-modal">${escapeHtml(modal.confirmLabel || "OK")}</button>
         </div>
       </div>
     </dialog>
@@ -1389,7 +1553,18 @@ function onClick(event) {
     session.form.titleTouched = true;
     render();
   } else if (action === "save-song") saveSong();
-  else if (action === "ask-delete") askDelete(el.dataset.id);
+  else if (action === "paste-clipboard") pasteFromClipboard();
+  else if (action === "use-fallback") {
+    captureForm();
+    applyPastedText(session.form?.raw || "");
+  } else if (action === "confirm-paste") confirmPaste();
+  else if (action === "retry-paste") {
+    if (!session.form) return;
+    session.form.preview = null;
+    session.form.error = "";
+    session.form.raw = "";
+    render();
+  } else if (action === "ask-delete") askDelete(el.dataset.id);
   else if (action === "leave") leaveLesson();
   else if (action === "pick") {
     rememberTyped();
@@ -1529,13 +1704,6 @@ function formatScore(value) {
 
 function gameName(id) {
   return GAMES.find((game) => game.id === id)?.name || "Lesson";
-}
-
-function greeting() {
-  const hour = new Date().getHours();
-  if (hour < 12) return "Good morning";
-  if (hour < 17) return "Good afternoon";
-  return "Good evening";
 }
 
 boot();

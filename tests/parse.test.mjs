@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyzePaste, detectTitleArtist, searchLyricsUrl } from "../js/parse.js";
+import { analyzePaste, cleanPastedPage, detectTitleArtist, draftLyrics, searchLyricsUrl } from "../js/parse.js";
 import { SAMPLE_SONG } from "../js/sample.js";
 
 test("detects a Title - Artist first line and keeps the song lines", () => {
@@ -69,6 +69,83 @@ test("keeps a sentence that merely contains the word embed", () => {
   const line = "The embed button sat on the counter";
   const parsed = analyzePaste([line, SAMPLE_SONG.lines[0]].join("\n"), { detectTitle: false });
   assert.deepEqual(parsed.lines, [line, SAMPLE_SONG.lines[0]]);
+});
+
+test("section labels stay attached to the following lines and repeats do not clear them", () => {
+  const parsed = analyzePaste([
+    "[Verse 1]",
+    "alpha one two",
+    "(x2)",
+    "[Chorus]",
+    "beta three four",
+    "Chorus:",
+    "gamma five six"
+  ].join("\n"), { detectTitle: false });
+  assert.deepEqual(parsed.lines, ["alpha one two", "beta three four", "gamma five six"]);
+  assert.deepEqual(parsed.sections, ["Verse 1", "Chorus", "Chorus"]);
+  assert.equal(draftLyrics(parsed.lines, parsed.sections), "[Verse 1]\nalpha one two\n[Chorus]\nbeta three four\ngamma five six");
+});
+
+test("blank lines become parts when a paste has no section tags", () => {
+  const parsed = analyzePaste([
+    "alpha one two",
+    "",
+    "beta three four",
+    "gamma five six",
+    ""
+  ].join("\n"), { detectTitle: false });
+  assert.deepEqual(parsed.lines, ["alpha one two", "beta three four", "gamma five six"]);
+  assert.deepEqual(parsed.sections, ["Part 1", "Part 2", "Part 2"]);
+
+  const single = analyzePaste(["alpha one two", "beta three four"].join("\n"), { detectTitle: false });
+  assert.deepEqual(single.sections, ["Part 1", "Part 1"]);
+});
+
+test("section tags win over blank lines", () => {
+  const parsed = analyzePaste([
+    "[Verse]",
+    "alpha one two",
+    "",
+    "[Chorus]",
+    "beta three four"
+  ].join("\n"), { detectTitle: false });
+  assert.deepEqual(parsed.sections, ["Verse", "Chorus"]);
+});
+
+test("a copied page keeps the longest lyric block and drops chrome", () => {
+  const page = [
+    "Home",
+    "Search",
+    "Sign in",
+    "Advertisement",
+    "red one two",
+    "red three four",
+    "Sponsored",
+    "Soft - LANY",
+    "[Verse 1]",
+    "alpha one two",
+    "beta three four",
+    "",
+    "[Chorus]",
+    "gamma five six",
+    "delta seven eight",
+    "epsilon nine ten",
+    "Written by A. Person",
+    "Copyright 2024 Example",
+    "All rights reserved",
+    "Follow",
+    "12 comments",
+    "Buy tickets"
+  ].join("\n");
+  const cleaned = cleanPastedPage(page, { detectTitle: false, title: "Soft", artist: "LANY" });
+  assert.deepEqual(cleaned.lines, [
+    "alpha one two",
+    "beta three four",
+    "gamma five six",
+    "delta seven eight",
+    "epsilon nine ten"
+  ]);
+  assert.deepEqual(cleaned.sections, ["Verse 1", "Verse 1", "Chorus", "Chorus", "Chorus"]);
 });
 
 test("find lyrics is only a web search link", () => {
