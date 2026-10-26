@@ -19,56 +19,41 @@ export function drawShareCard(card) {
   canvas.width = 1080;
   canvas.height = 1080;
   const ctx = canvas.getContext("2d");
-  const background = ctx.createLinearGradient(0, 0, 1080, 1080);
-  background.addColorStop(0, "#2a1022");
-  background.addColorStop(0.45, "#140810");
-  background.addColorStop(1, "#3a2410");
-  ctx.fillStyle = background;
+  const accent = card.kind === "concert" ? "#2c587f" : "#8d3a58";
+  ctx.fillStyle = "#f4f0ea";
   ctx.fillRect(0, 0, 1080, 1080);
+  ctx.fillStyle = accent;
+  ctx.fillRect(0, 0, 1080, 460);
 
-  const spotlight = ctx.createRadialGradient(180, 0, 40, 180, 0, 520);
-  spotlight.addColorStop(0, "rgba(255, 176, 32, 0.55)");
-  spotlight.addColorStop(1, "rgba(255, 176, 32, 0)");
-  ctx.fillStyle = spotlight;
-  ctx.fillRect(0, 0, 1080, 1080);
-  const pink = ctx.createRadialGradient(980, 160, 20, 980, 160, 420);
-  pink.addColorStop(0, "rgba(255, 47, 134, 0.45)");
-  pink.addColorStop(1, "rgba(255, 47, 134, 0)");
-  ctx.fillStyle = pink;
-  ctx.fillRect(0, 0, 1080, 1080);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "600 28px Inter, sans-serif";
+  ctx.fillText("Lyric Trainer", 96, 120);
 
-  ctx.fillStyle = "#ffb020";
-  ctx.font = "700 28px Nunito, sans-serif";
-  ctx.fillText("LYRIC TRAINER", 96, 140);
+  ctx.font = "600 64px Inter, sans-serif";
+  const titleLines = wrapText(ctx, card.title || "Score", 888).slice(0, 2);
+  titleLines.forEach((line, index) => ctx.fillText(line, 96, 230 + index * 80));
 
-  ctx.fillStyle = "#fff8ef";
-  ctx.font = "800 84px Georgia, serif";
-  const titleLines = wrapText(ctx, card.title || "Score", 888).slice(0, 3);
-  titleLines.forEach((line, index) => ctx.fillText(line, 96, 280 + index * 92));
+  ctx.fillStyle = "#1d1a22";
+  ctx.font = "600 148px Inter, sans-serif";
+  ctx.fillText(String(Math.max(0, Math.round(Number(card.score) || 0))), 96, 640);
 
-  let y = 300 + titleLines.length * 92;
-  ctx.font = "700 36px Nunito, sans-serif";
-  ctx.fillStyle = "#ffd7e6";
+  ctx.font = "600 36px Inter, sans-serif";
+  ctx.fillStyle = "#5e5668";
+  let y = 720;
   if (card.kind === "concert") {
     ctx.fillText("Concert score", 96, y);
+    y += 56;
   } else if (card.artist) {
     const artistLines = wrapText(ctx, card.artist, 888).slice(0, 2);
     artistLines.forEach((line) => {
       ctx.fillText(line, 96, y);
-      y += 48;
+      y += 52;
     });
   }
-
-  ctx.fillStyle = "#fff8ef";
-  ctx.font = "800 160px Georgia, serif";
-  ctx.fillText(String(Math.max(0, Math.round(Number(card.score) || 0))), 96, 860);
-
-  ctx.font = "700 32px Nunito, sans-serif";
-  ctx.fillStyle = "#ffb020";
   const streak = Math.max(0, Math.round(Number(card.streak) || 0));
   const bits = [`${streak} day streak`, card.playerName || "You"];
   if (card.detail && card.kind === "concert") bits.unshift(card.detail);
-  ctx.fillText(bits.join("   ·   "), 96, 940);
+  ctx.fillText(bits.join("   ·   "), 96, 960);
 
   const encoded = canvas.toDataURL("image/png").split(",")[1];
   const binary = atob(encoded);
