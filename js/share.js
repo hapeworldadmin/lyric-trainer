@@ -6,12 +6,12 @@ export function shareText(card) {
   const days = `${streak} day${streak === 1 ? "" : "s"}`;
   if (card.kind === "concert") {
     const detail = card.detail ? ` ${card.detail}.` : "";
-    return `${playerName} scored ${score} for ${title} in Lyric Trainer.${detail} Streak: ${days}.`;
+    return `${playerName} scored ${score} for ${title} in Know the Verse.${detail} Streak: ${days}.`;
   }
   const artist = String(card.artist || "").trim();
   const by = artist ? ` by ${artist}` : "";
   const detail = card.detail ? ` (${card.detail})` : "";
-  return `${playerName} scored ${score} on "${title}"${by}${detail} in Lyric Trainer. Streak: ${days}.`;
+  return `${playerName} scored ${score} on "${title}"${by}${detail} in Know the Verse. Streak: ${days}.`;
 }
 
 export function drawShareCard(card) {
@@ -27,7 +27,7 @@ export function drawShareCard(card) {
 
   ctx.fillStyle = "#ffffff";
   ctx.font = "600 28px Inter, sans-serif";
-  ctx.fillText("Lyric Trainer", 96, 120);
+  ctx.fillText("Know the Verse", 96, 120);
 
   ctx.font = "600 64px Inter, sans-serif";
   const titleLines = wrapText(ctx, card.title || "Score", 888).slice(0, 2);

@@ -1,7 +1,7 @@
-import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js";
+import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js?v=4";
 
 export const MASTER_CORRECT = 2;
-const GAMES = new Set(["fill", "order", "next", "letters", "concert"]);
+const GAMES = new Set(["fill", "order", "next", "letters", "concert", "sections", "lines"]);
 
 export function emptyProgress() {
   return {
@@ -247,7 +247,7 @@ function publicRun(entry) {
 
 export function mergeImport(state, data) {
   if (!data || data.kind !== "lyric-trainer-progress" || data.version !== 1) {
-    throw new Error("Choose a Lyric Trainer progress file.");
+    throw new Error("Choose a Know the Verse progress file.");
   }
   const importedPlayers = Array.isArray(data.players) ? data.players : [];
   for (const raw of importedPlayers) {

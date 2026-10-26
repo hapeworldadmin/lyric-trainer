@@ -1,17 +1,17 @@
-# Lyric Trainer
+# Know the Verse
 
-Lyric Trainer is a small, mobile-friendly game for memorizing song lyrics **you paste yourself**. Lessons feel like a short practice round: fill in a missing word, unscramble a line, pick the next line, rebuild a line from first letters, or run the whole song on a timer.
+Know the Verse is a small, mobile-friendly game for memorizing song lyrics **you paste yourself**. Lessons follow the song: section order, line order, next line, then a timed final run.
 
 It is a static site. There is no account and no server. Lyrics stay in your browser.
 
 ## How to use it
 
-1. Tap **Add song** and paste lyrics into the box.
-2. If the first line looks like `Title - Artist`, that becomes the song name. Otherwise, type the title and artist.
-3. Section labels such as `[Chorus]` and `[Verse 1]`, extra blank lines, and paste junk such as `Embed` or `You might also like` are stripped before you save.
-4. **Find lyrics** opens a web search in a new tab. The app does not download or read that page.
-5. Open a song and play any lesson. You get five hearts, instant feedback, XP, and a score.
-6. A line counts as mastered after two correct answers. The song's mastery is how many of its lines you have mastered.
+1. Open a concert and tap a row that says **Needs lyrics**.
+2. **Find lyrics** opens a web search for that title and artist in a new tab. Know the Verse does not download the page.
+3. **Paste** reads the clipboard, drops navigation, ads, and credits, and keeps the longest lyric-like block. **Looks right** saves it to that setlist slot and opens the first lesson. If the clipboard is blocked, a paste box appears.
+4. **Next song needing lyrics** moves to the next empty slot.
+5. **Add song** on the home screen is the same paste flow when the song is not on a setlist. A first line like `Title - Artist` can name it.
+6. You get five hearts, instant feedback, XP, and a score. A line counts as mastered after two correct answers.
 7. Finish at least one lesson a day to keep a streak.
 8. Edit or delete a song from its page. Deleting removes the words from this device. Scores can remain, without the words.
 
@@ -19,11 +19,16 @@ The only song included with the app is an original placeholder, **Banana Flashli
 
 ### Games
 
-- **Fill the blank** — type the missing word or tap it.
-- **Word order** — put a shuffled line back together.
+The main path follows the song:
+
+- **Section order** — arrange Verse, Chorus, Bridge, and the rest. Blank lines become Part 1, Part 2, and so on when the paste has no section labels.
+- **Line order** — put the lines of one section back in order.
 - **Next line** — choose the line that comes next.
-- **First letters** — type the full line from first-letter hints.
-- **Concert mode** — a timed pass through the whole song.
+- **Final run** — a timed pass through the whole song.
+
+**Tricky lines** is a short warm-up: fill the blank, word order, and first letters.
+
+Fill the blank, word order, first letters, and next line show the previous line above the question and the next line below it, in a quieter style. The first line has no previous line, and the last line has no next line. When a section label was in the paste, the question also shows it and the position, such as `Chorus · line 12 of 40`. Section order and line order do not show the lines you are arranging.
 
 ### Players, scores, and backup
 

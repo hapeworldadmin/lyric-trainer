@@ -1,11 +1,13 @@
-import { displayToken, mulberry32, normalizeAnswer, shuffle, tokenize } from "./text.js";
+import { displayToken, mulberry32, normalizeAnswer, shuffle, tokenize } from "./text.js?v=4";
 
 export const GAMES = [
-  { id: "fill", name: "Fill the blank", detail: "Type it or tap the missing word" },
-  { id: "order", name: "Word order", detail: "Put the shuffled line back together" },
-  { id: "next", name: "Next line", detail: "Choose the line that comes next" },
-  { id: "letters", name: "First letters", detail: "Type the line from the first letters" },
-  { id: "concert", name: "Concert mode", detail: "Timed full-song run" }
+  { id: "sections", name: "Section order", detail: "Arrange the sections", group: "main" },
+  { id: "lines", name: "Line order", detail: "Reorder the lines in a section", group: "main" },
+  { id: "next", name: "Next line", detail: "Choose the line that comes next", group: "main" },
+  { id: "concert", name: "Final run", detail: "Timed full-song run", group: "main" },
+  { id: "fill", name: "Fill the blank", detail: "A short warm-up on one word", group: "warm" },
+  { id: "order", name: "Word order", detail: "Rebuild one line", group: "warm" },
+  { id: "letters", name: "First letters", detail: "Type the line from first letters", group: "warm" }
 ];
 
 const STOP = new Set("a an the and or but if to of in on for at by from with it my we you he she they i is was were and".split(" "));
@@ -13,15 +15,58 @@ const DECOYS = ["kazoo", "slipper", "marble", "comet", "pocket", "lantern", "spr
 const LESSON_LENGTH = 6;
 export const CONCERT_SECONDS = 12;
 
-export function gameAvailability(lines) {
+export function sectionBlocks(lines, sections = []) {
   const list = lines || [];
+  const labels = sections || [];
+  const raw = [];
+  let start = 0;
+  const nameAt = (index) => String(labels[index] || "").trim();
+  for (let index = 1; index <= list.length; index += 1) {
+    if (index === list.length || nameAt(index) !== nameAt(start)) {
+      raw.push({ start, end: index, name: nameAt(start) });
+      start = index;
+    }
+  }
+  const seen = new Map();
+  let part = 0;
+  return raw.map((block) => {
+    let base = block.name;
+    if (!base) {
+      part += 1;
+      base = `Part ${part}`;
+    }
+    const count = (seen.get(base) || 0) + 1;
+    seen.set(base, count);
+    return {
+      id: `s${block.start}`,
+      start: block.start,
+      end: block.end,
+      label: count === 1 ? base : `${base} ${count}`,
+      lines: list.slice(block.start, block.end)
+    };
+  });
+}
+
+export function gameAvailability(lines, sections = []) {
+  const list = lines || [];
+  const blocks = sectionBlocks(list, sections);
   return {
     fill: list.some((line) => chooseBlank(tokenize(line), () => 0)),
     order: list.some((line) => tokenize(line).length >= 3),
     next: list.length >= 3,
     letters: list.some((line) => tokenize(line).length >= 1),
-    concert: list.length >= 1 && list.some((line) => tokenize(line).length >= 1)
+    concert: list.length >= 1 && list.some((line) => tokenize(line).length >= 1),
+    sections: blocks.length >= 2,
+    lines: blocks.some((block) => block.lines.length >= 2)
   };
+}
+
+export function firstLessonId(lines, sections = []) {
+  const availability = gameAvailability(lines, sections);
+  for (const id of ["sections", "lines", "next", "fill", "letters", "order"]) {
+    if (availability[id]) return id;
+  }
+  return "letters";
 }
 
 export function letterHint(line) {
@@ -39,24 +84,101 @@ export function answersMatch(expected, given) {
 
 export function pointsFor({ kind, correct, combo, secondsLeft }) {
   if (!correct) return { xp: 0, score: 0 };
-  const base = { fill: 10, next: 10, order: 12, letters: 15 }[kind] || 10;
+  const base = { fill: 10, next: 10, order: 12, letters: 15, lines: 14, sections: 16 }[kind] || 10;
   const xp = base + Math.min(10, Math.max(0, combo - 1) * 2);
   let score = 100 + combo * 10;
   if (typeof secondsLeft === "number") score += Math.max(0, Math.round(secondsLeft * 8));
   return { xp, score };
 }
 
-export function buildLesson(lines, gameId, rng = Math.random) {
+export function lineContext(lines, index, sections = []) {
+  const list = lines || [];
+  const total = list.length;
+  if (!total) return { section: "", position: 0, total: 0, previous: "", next: "" };
+  const at = Math.max(0, Math.min(index, total - 1));
+  return {
+    section: String(sections?.[at] || ""),
+    position: at + 1,
+    total,
+    previous: at > 0 ? list[at - 1] : "",
+    next: at < total - 1 ? list[at + 1] : ""
+  };
+}
+
+function withContext(question, lines, sections) {
+  if (!question) return null;
+  return { ...question, context: lineContext(lines, question.lineIndex, sections) };
+}
+
+function shuffleTokens(tokens, rng) {
+  let shuffled = shuffle(tokens, rng);
+  if (shuffled.length > 1 && shuffled.every((token, index) => token.id === tokens[index].id)) {
+    shuffled = [...shuffled.slice(1), shuffled[0]];
+  }
+  return shuffled;
+}
+
+function blockContext(lines, block, rangeLabel) {
+  return {
+    section: block?.label || "",
+    position: block ? block.start + 1 : 1,
+    total: lines.length,
+    previous: "",
+    next: "",
+    rangeLabel
+  };
+}
+
+function makeSectionOrder(lines, sections, rng) {
+  const blocks = sectionBlocks(lines, sections);
+  if (blocks.length < 2) return null;
+  const tokens = blocks.map((block) => ({ id: block.id, text: block.label }));
+  return {
+    kind: "sections",
+    lineIndex: blocks[0].start,
+    line: blocks[0].lines[0] || "",
+    tokens,
+    shuffled: shuffleTokens(tokens, rng),
+    context: blockContext(lines, null, `${blocks.length} sections`)
+  };
+}
+
+function makeLineOrder(lines, block, rng) {
+  const tokens = block.lines.map((text, index) => ({ id: `l${block.start + index}`, text }));
+  if (tokens.length < 2) return null;
+  const end = block.end;
+  return {
+    kind: "lines",
+    lineIndex: block.start,
+    line: block.lines[0] || "",
+    tokens,
+    shuffled: shuffleTokens(tokens, rng),
+    context: blockContext(lines, block, `${block.label} · lines ${block.start + 1}–${end} of ${lines.length}`)
+  };
+}
+
+export function buildLesson(lines, gameId, rng = Math.random, sections = []) {
   const list = [...(lines || [])];
+  const labels = sections || [];
+  if (gameId === "sections") {
+    const question = makeSectionOrder(list, labels, rng);
+    return question ? [question] : [];
+  }
+  if (gameId === "lines") {
+    const blocks = sectionBlocks(list, labels).filter((block) => block.lines.length >= 2);
+    const count = Math.min(LESSON_LENGTH, blocks.length);
+    return shuffle(blocks, rng).slice(0, count).map((block) => makeLineOrder(list, block, rng)).filter(Boolean);
+  }
   if (gameId === "concert") {
-    return list.map((line, index) => {
+    return list.map((_, index) => {
       const prefer = index % 2 === 0 ? "fill" : "letters";
-      return makeQuestion(list, index, prefer, rng) || makeQuestion(list, index, prefer === "fill" ? "letters" : "fill", rng);
+      const question = makeQuestion(list, index, prefer, rng) || makeQuestion(list, index, prefer === "fill" ? "letters" : "fill", rng);
+      return withContext(question, list, labels);
     }).filter(Boolean);
   }
   const eligible = list.map((_, index) => index).filter((index) => canAsk(list, index, gameId));
   const count = Math.min(LESSON_LENGTH, eligible.length);
-  return shuffle(eligible, rng).slice(0, count).map((index) => makeQuestion(list, index, gameId, rng)).filter(Boolean);
+  return shuffle(eligible, rng).slice(0, count).map((index) => withContext(makeQuestion(list, index, gameId, rng), list, labels)).filter(Boolean);
 }
 
 function canAsk(lines, index, kind) {
@@ -183,7 +305,6 @@ export function seededRng(seed) {
 }
 
 export function isOrderCorrect(question, arrangedIds) {
-  const byId = new Map(question.tokens.map((token) => [token.id, token.text]));
-  const guess = arrangedIds.map((id) => byId.get(id) || "").join(" ");
-  return answersMatch(question.answer, guess);
+  const expected = (question.tokens || []).map((token) => token.id).join("\n");
+  return expected.length > 0 && arrangedIds.join("\n") === expected;
 }
