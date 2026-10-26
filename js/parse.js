@@ -550,6 +550,39 @@ function rangesFromBreaks(count, breakBefore) {
   return ranges;
 }
 
+function lyricFamily(lines) {
+  return lines.map((line) => nearLyricKey(line)).filter(Boolean).join("\n");
+}
+
+function unifyRepeatedBodies(lines, labels) {
+  const next = labels.map((label) => label || "Part 1");
+  const blocks = [];
+  let start = 0;
+  for (let index = 1; index <= lines.length; index += 1) {
+    if (index === lines.length || next[index] !== next[start]) {
+      blocks.push({ start, end: index });
+      start = index;
+    }
+  }
+  const groups = new Map();
+  for (const block of blocks) {
+    if (block.end - block.start < 2) continue;
+    const family = lyricFamily(lines.slice(block.start, block.end));
+    if (!family) continue;
+    if (!groups.has(family)) groups.set(family, []);
+    groups.get(family).push(block);
+  }
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const names = new Set(group.map((block) => String(next[block.start] || "").replace(/\s+\d+$/, "")));
+    if ([...names].every((name) => name === "Chorus")) continue;
+    for (const block of group) {
+      for (let index = block.start; index < block.end; index += 1) next[index] = "Chorus";
+    }
+  }
+  return next;
+}
+
 function isFlatPart(labels) {
   const names = new Set(labels);
   if (names.size > 1) return false;
@@ -560,8 +593,8 @@ function isFlatPart(labels) {
 export function inferSections(lines, sections = []) {
   const list = [...(lines || [])];
   const labels = list.map((_, index) => String(sections?.[index] || "").trim());
-  if (!isFlatPart(labels)) return labels;
-  return autoStructure(list);
+  const resolved = !isFlatPart(labels) ? labels : autoStructure(list);
+  return unifyRepeatedBodies(list, resolved);
 }
 
 export function cleanPastedPage(raw, { detectTitle = true, title = "", artist = "" } = {}) {
@@ -643,9 +676,9 @@ export function analyzePaste(raw, { detectTitle = true } = {}) {
   if (!sawTag) {
     const texts = items.map((item) => item.text);
     const breakBefore = items.map((item) => item.breakBefore);
-    const labels = breakBefore.some(Boolean)
+    const labels = unifyRepeatedBodies(texts, breakBefore.some(Boolean)
       ? labelStanzaRanges(texts, rangesFromBreaks(texts.length, breakBefore))
-      : autoStructure(texts);
+      : autoStructure(texts));
     items.forEach((item, index) => {
       item.section = labels[index] || "Part 1";
     });

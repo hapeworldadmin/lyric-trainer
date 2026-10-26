@@ -520,7 +520,9 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
   text-align: center;
   padding: 0 4px;
 }
-.ask { margin: 0 0 8px; }
+.section-sheet { display: grid; gap: 8px; }
+.section-row { width: 100%; justify-content: space-between; }
+.section-check { color: var(--good); font-weight: 700; }
 .choices, .pool, .tray { display: flex; flex-wrap: wrap; gap: 8px; }
 .choices.is-stacked, .pool.is-stacked, .tray.is-stacked { display: grid; }
 .pool.is-stacked .token, .tray.is-stacked .token {

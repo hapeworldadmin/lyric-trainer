@@ -295,6 +295,21 @@ test("a google-shaped paste keeps stanza boundaries and does not split a stanza"
   assert.deepEqual(fromHtml.sections, expected);
 });
 
+test("a chorus repeat that only changes punctuation stays one chorus", () => {
+  const verse1 = ["paper boats along the stair", "counting windows in the rain"];
+  const chorus = ["carry the lantern upstairs", "leave the quiet in the hall", "spin the silver kitchen light"];
+  const verse2 = ["morning folded on the chair", "tickets hidden in a book"];
+  const repeat = ["carry the lantern upstairs?", chorus[1], chorus[2]];
+  const lines = [...verse1, ...chorus, ...verse2, ...repeat];
+  const parsed = analyzePaste(lines.join("\n"), { detectTitle: false });
+  assert.deepEqual(parsed.sections, [
+    ...verse1.map(() => "Verse 1"),
+    ...chorus.map(() => "Chorus"),
+    ...verse2.map(() => "Verse 2"),
+    ...repeat.map(() => "Chorus")
+  ]);
+});
+
 test("find lyrics is only a web search link", () => {
   const url = new URL(searchLyricsUrl("Paper Moonfish", "House Band"));
   assert.equal(url.origin, "https://www.google.com");

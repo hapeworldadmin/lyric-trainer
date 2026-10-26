@@ -12,7 +12,6 @@ import {
   gameAvailability,
   judgeOrderTap,
   lessonBonus,
-  nextPractice,
   pointsFor,
   questionSeconds,
   sectionProgress
@@ -234,7 +233,7 @@ function shell(body, { play }) {
     : (song ? concertsForSong(session.concerts, song.title, song.artist)[0] : session.concerts[0]);
   return `
     <div class="app tone-${tone} accent-${shellAccent()} ${play ? "is-play" : ""} ${tabs ? "has-tabs" : ""}" style="${accentStyle(concert)}">
-      ${play ? "" : topbar()}
+      ${play || route.name === "results" ? "" : topbar()}
       <main>${body}</main>
       ${tabs ? tabbar() : ""}
     </div>
@@ -480,7 +479,7 @@ function viewSong() {
   const progress = progressOf(session.state);
   const stats = songStats(progress, song);
   const availability = gameAvailability(song.lines, song.sections || []);
-  const plan = chapterPlan(song.lines, song.sections || [], stats.chapters || {});
+  const plan = chapterPlan(song.lines, song.sections || [], stats.chapters || {}, stats.rounds || {});
   const playable = plan.filter((chapter) => chapter.status !== "unavailable");
   const doneCount = playable.filter((chapter) => chapter.status === "done").length;
   const reasons = {
@@ -493,7 +492,8 @@ function viewSong() {
       return `<button class="game" type="button" disabled><span>${index + 1} ${escapeHtml(chapter.name)}<small>Not enough lines</small></span></button>`;
     }
     if (chapter.status === "locked") {
-      return `<button class="game" type="button" disabled><span>${index + 1} ${escapeHtml(chapter.name)}<small>Finish the previous chapter</small></span></button>`;
+      const note = chapter.id === "concert" ? "Finish each section" : "Finish the previous chapter";
+      return `<button class="game" type="button" disabled><span>${index + 1} ${escapeHtml(chapter.name)}<small>${note}</small></span></button>`;
     }
     const mark = chapter.status === "done" ? "Done" : "Open";
     return `
@@ -601,7 +601,7 @@ function playCrumb(play, question) {
 function contextHtml(question) {
   const context = question?.context;
   if (!context) return { before: "", after: "" };
-  const showPrevious = context.previous && question.kind !== "next" && question.kind !== "sections" && !question.hidesPrevious;
+  const showPrevious = context.previous && question.kind !== "next" && !question.hidesPrevious;
   const previous = showPrevious ? `<p class="context-line is-anchor" data-testid="context-previous">${escapeHtml(context.previous)}</p>` : "";
   const allowNext = session.play?.gameId === "lines" && question.kind === "lines";
   const next = allowNext && context.next
@@ -633,9 +633,7 @@ function questionHtml(question) {
   if (question.kind === "which") {
     return `<p class="target-line" data-testid="question">${escapeHtml(question.prompt)}</p><p class="ask">Which section is this?</p>`;
   }
-  if (question.kind === "intruder") return `<p class="ask" data-testid="question">Which line does not belong?</p>`;
   if (question.kind === "swap") return `<p class="ask" data-testid="question">Tap the word that does not belong</p>`;
-  if (question.kind === "sections") return `<p class="ask" data-testid="question">Tap the opening lines in order</p>`;
   if (question.kind === "lines") return `<p class="ask" data-testid="question">Tap the lines in order</p>`;
   return `<p class="ask" data-testid="question">Tap the words in order</p>`;
 }
@@ -668,19 +666,18 @@ function answerControls(question) {
       <button class="token" type="button" data-action="pick-swap" data-option="${index}" data-token="${escapeHtml(word.id)}">${keyHint(index)}${escapeHtml(word.text)}</button>
     `).join("")}</div>`;
   }
-  if (question.kind === "order" || question.kind === "lines" || question.kind === "sections") {
+  if (question.kind === "order" || question.kind === "lines") {
     const order = ensureOrder();
     const stacked = question.kind === "order" ? "" : " is-stacked";
     const byId = new Map(question.tokens.map((token) => [token.id, token]));
     const placed = order.arranged.map((id) => {
       const token = byId.get(id);
-      const tag = question.kind === "sections" && token?.label ? `<span class="token-tag">${escapeHtml(token.label)}</span>` : "";
-      return `<span class="token is-set${order.justPlaced === id ? " is-placed" : ""}">${escapeHtml(token?.text || "")}${tag}</span>`;
+      return `<span class="token is-set${order.justPlaced === id ? " is-placed" : ""}">${escapeHtml(token?.text || "")}</span>`;
     }).join("");
     const pool = order.pool.map((id, index) => `
       <button class="token" type="button" data-action="pick-token" data-option="${index}" data-token="${escapeHtml(id)}">${keyHint(index)}${escapeHtml(byId.get(id)?.text || "")}</button>
     `).join("");
-    const empty = question.kind === "sections" ? "The order appears here" : "Your line appears here";
+    const empty = "Your line appears here";
     return `
       <div class="tray${stacked}" data-testid="tray">${placed || `<span class="hint">${empty}</span>`}</div>
       <div class="pool${stacked}">${pool}</div>
@@ -710,40 +707,41 @@ function viewResults() {
   const progress = progressOf(session.state);
   const stats = song ? songStats(progress, song) : null;
   const sections = song ? sectionProgress(song.lines, song.sections || [], stats?.rounds || {}) : [];
-  const open = results.showSections ? `
-    <div class="section-list" data-testid="section-list">
-      ${sections.map((section) => `
-        <button class="choice" type="button" data-action="practice-chunk" data-start="${section.start}" data-round="${escapeHtml(section.roundId)}">
-          <span>${escapeHtml(section.opener)}</span>
-          <span class="sub">${section.mastered}/${section.total}${section.done ? " · done" : ""}</span>
+  const practice = sections.filter((section) => section.practice);
+  const doneCount = practice.filter((section) => section.done).length;
+  const nextSection = practice.find((section) => !section.done);
+  const songDone = Boolean(results.songMastered || stats?.songMastered);
+  const stat = songDone
+    ? "Song mastered"
+    : (practice.length ? `${doneCount} of ${practice.length} sections` : "Ready for the final run");
+  const sheet = results.showSections ? `
+    <div class="section-sheet" data-testid="section-list">
+      ${sections.filter((section) => section.roundId).map((section) => `
+        <button class="choice section-row" type="button" data-action="practice-chunk" data-round="${escapeHtml(section.roundId)}" data-again="${section.done ? "1" : ""}">
+          <span>${escapeHtml(section.label)}</span>
+          ${section.done ? `<span class="section-check" aria-label="Done">✓</span>` : ""}
         </button>
-        ${section.done ? `<button class="btn btn-text" type="button" data-action="practice-again" data-round="${escapeHtml(section.roundId)}">Practice again</button>` : ""}
       `).join("")}
     </div>` : "";
-  const finalLocked = song ? chapterPlan(song.lines, song.sections || [], stats?.chapters || {}).find((item) => item.id === "concert")?.status === "locked" : false;
-  const bits = [];
-  if (results.xp > 0) bits.push(`${results.xp} XP`);
-  if (results.accuracy > 0) bits.push(`${results.accuracy}% accuracy`);
-  if (results.streak > 0) bits.push(`<span data-testid="result-streak">${results.streak}</span> day streak`);
+  let primary = "";
+  if (songDone) {
+    primary = nextLyricsLink(results.title, results.artist, "", true);
+  } else if (!nextSection) {
+    primary = `<a class="btn btn-primary" data-testid="final-run" data-primary href="#/play/${encodeURIComponent(results.songId)}/concert">Final run <span class="key-hint">Enter</span></a>`;
+  } else {
+    primary = `<button class="btn btn-primary" type="button" data-action="continue-section" data-round="${escapeHtml(nextSection.roundId)}" data-primary data-testid="continue-section">Continue: ${escapeHtml(nextSection.label)} <span class="key-hint">Enter</span></button>`;
+  }
   return `
-    <section class="screen">
-      <header class="page-head">
-        <p class="kicker">${results.songMastered ? "Song mastered" : (results.newBest ? "New best" : "Round complete")}</p>
-        <h1 data-testid="final-score">${formatScore(results.score)}</h1>
-        <p class="sub">${escapeHtml(results.title)} · ${escapeHtml(results.artist)}</p>
-      </header>
-      <p class="sub" data-testid="hearts-left">${results.hearts} hearts left</p>
-      ${bits.length ? `<p class="sub">${bits.join(" · ")}</p>` : ""}
+    <section class="screen" data-testid="results">
+      <div class="play-top">
+        <button class="icon-btn" type="button" data-action="close-results" data-testid="close-results" aria-label="Close">${icon("close")}</button>
+      </div>
+      <h1 data-testid="final-score">${formatScore(results.score)}</h1>
+      <p class="sub" data-testid="result-stat">${stat}</p>
       <div class="dock">
-        <button class="btn btn-primary" type="button" data-action="keep-practicing" data-primary data-testid="keep-practicing">Keep practicing <span class="key-hint">Enter</span></button>
-        <button class="btn btn-secondary" type="button" data-action="toggle-sections" data-testid="practice-section">Practice a section</button>
-        ${open}
-        ${finalLocked
-          ? `<button class="btn btn-secondary" type="button" disabled data-testid="final-run">Final run</button>`
-          : `<a class="btn btn-secondary" data-testid="final-run" href="#/play/${encodeURIComponent(results.songId)}/concert">Final run</a>`}
-        <button class="btn btn-text" type="button" data-action="share-results" data-testid="share-score">Share my score</button>
-        <a class="btn btn-text" href="#/song/${encodeURIComponent(results.songId)}">Back to song</a>
-        ${nextLyricsLink(results.title, results.artist, "")}
+        ${primary}
+        ${sections.length ? `<button class="btn btn-text" type="button" data-action="toggle-sections" data-testid="choose-section">Choose section</button>` : ""}
+        ${sheet}
       </div>
     </section>
   `;
@@ -1202,7 +1200,7 @@ function confirmPaste() {
   go(`#/play/${encodeURIComponent(song.id)}/${lesson}`);
 }
 
-function nextLyricsLink(title, artist, concertId) {
+function nextLyricsLink(title, artist, concertId, primary = false) {
   const ids = [];
   if (concertId) ids.push(concertId);
   if (title && artist) {
@@ -1217,7 +1215,10 @@ function nextLyricsLink(title, artist, concertId) {
     const slot = summary.slots.find((item) => item.status === "needs-lyrics" && !(title && artist && songsMatch(item.title, item.artist, title, artist)));
     if (!slot) continue;
     const href = `#/add?title=${encodeURIComponent(slot.title)}&artist=${encodeURIComponent(slot.artist)}&concert=${encodeURIComponent(concert.id)}`;
-    return `<a class="btn btn-outline" data-testid="next-lyrics" href="${href}">Next song</a>`;
+    const cls = primary ? "btn btn-primary" : "btn btn-outline";
+    const hint = primary ? ` <span class="key-hint">Enter</span>` : "";
+    const primaryAttr = primary ? " data-primary" : "";
+    return `<a class="${cls}"${primaryAttr} data-testid="next-lyrics" href="${href}">Next song${hint}</a>`;
   }
   return "";
 }
@@ -1230,6 +1231,14 @@ function showFormError(message) {
 function ensurePlay() {
   const route = session.route;
   const song = findSong(route.songId);
+  if (!song) {
+    go("#/");
+    return false;
+  }
+  if (route.gameId === "sections") {
+    go(`#/play/${encodeURIComponent(song.id)}/lines`);
+    return false;
+  }
   const game = GAMES.find((item) => item.id === route.gameId);
   if (!song || !game) {
     go("#/");
@@ -1317,7 +1326,7 @@ function submitCurrent(forced = null) {
     play.picked = forced?.choice ?? play.picked;
     if (!play.picked) return;
     correct = answersMatch(question.answer, play.picked);
-  } else if (question.kind === "order" || question.kind === "lines" || question.kind === "sections") {
+  } else if (question.kind === "order" || question.kind === "lines") {
     if (forced?.orderFailed) {
       correct = false;
     } else {
@@ -1399,16 +1408,6 @@ function continueLesson() {
   play.deadline = null;
   stopTimer();
   render();
-}
-
-function keepPracticing() {
-  const results = session.results;
-  const song = results && findSong(results.songId);
-  if (!song) return;
-  const stats = songStats(progressOf(session.state), song);
-  const step = nextPractice(song.lines, song.sections || [], { rounds: stats.rounds || {}, chapters: stats.chapters || {} });
-  const query = step.roundId ? `?round=${encodeURIComponent(step.roundId)}` : "";
-  go(`#/play/${encodeURIComponent(song.id)}/${step.gameId}${query}`);
 }
 
 function watchNetlifyBadge() {
@@ -1906,15 +1905,17 @@ function onClick(event) {
     }
     submitCurrent({ swapId: word.id });
   } else if (action === "check") submitCurrent();
-  else if (action === "keep-practicing") keepPracticing();
   else if (action === "toggle-sections") {
     if (session.results) session.results.showSections = !session.results.showSections;
     render();
-  } else if (action === "practice-chunk" || action === "practice-again") {
+  } else if (action === "continue-section" || action === "practice-chunk" || action === "practice-again") {
     const songId = session.results?.songId;
     const round = el.dataset.round || "";
-    const again = action === "practice-again" ? "&again=1" : "";
+    const again = action === "practice-again" || el.dataset.again === "1" ? "&again=1" : "";
     if (songId && round) go(`#/play/${encodeURIComponent(songId)}/lines?round=${encodeURIComponent(round)}${again}`);
+  } else if (action === "close-results") {
+    const songId = session.results?.songId;
+    go(songId ? `#/song/${encodeURIComponent(songId)}` : "#/");
   } else if (action === "continue") continueLesson();
   else if (action === "confirm-modal") {
     const confirm = session.modal?.onConfirm;

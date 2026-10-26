@@ -32,9 +32,8 @@ test("every game can be built from the sample song", () => {
   assert.equal(availability.next, true);
   assert.equal(availability.letters, true);
   assert.equal(availability.concert, true);
-  assert.equal(availability.sections, true);
   assert.equal(availability.lines, true);
-  assert.equal(firstLessonId(SAMPLE_SONG.lines, SAMPLE_SONG.sections), "sections");
+  assert.equal(firstLessonId(SAMPLE_SONG.lines, SAMPLE_SONG.sections), "lines");
   for (const gameId of ["fill", "order", "letters"]) {
     const lesson = buildLesson(SAMPLE_SONG.lines, gameId, seededRng(7));
     assert.ok(lesson.length >= 1 && lesson.length <= 6);
@@ -128,22 +127,12 @@ test("context lines cover neighbors, section labels, and the ends of a song", ()
   assert.notEqual(next.context.previous, next.answer);
 });
 
-test("section order and line order check ids, and repeated sections stay distinct", () => {
+test("line order checks ids, and a repeated chorus keeps its own label", () => {
   const lines = ["alpha one two", "beta three four", "gamma five six", "delta seven eight"];
   const sections = ["Chorus", "Verse", "Chorus", "Chorus"];
   const blocks = sectionBlocks(lines, sections);
   assert.deepEqual(blocks.map((block) => block.label), ["Chorus", "Verse", "Chorus 2"]);
   assert.deepEqual(blocks.map((block) => block.lines.length), [1, 1, 2]);
-
-  const [sectionsQuestion] = buildLesson(lines, "sections", seededRng(1), sections);
-  assert.equal(sectionsQuestion.kind, "sections");
-  assert.equal(isOrderCorrect(sectionsQuestion, sectionsQuestion.tokens.map((token) => token.id)), true);
-  assert.equal(isOrderCorrect(sectionsQuestion, [...sectionsQuestion.tokens].reverse().map((token) => token.id)), false);
-  assert.equal(sectionsQuestion.tokens[0].text, lines[0]);
-  assert.equal(sectionsQuestion.tokens[0].label, "Chorus");
-  assert.equal(sectionsQuestion.context.rangeLabel, "3 sections");
-  assert.equal(sectionsQuestion.context.previous, "");
-  assert.equal(sectionsQuestion.context.next, "");
 
   const [lineQuestion] = buildLesson(lines, "lines", seededRng(2), sections);
   assert.equal(lineQuestion.kind, "lines");
@@ -153,8 +142,9 @@ test("section order and line order check ids, and repeated sections stay distinc
   assert.match(lineQuestion.context.rangeLabel, /lines 3–4 of 4/);
   assert.equal(lineQuestion.context.previous, lines[1]);
   assert.equal(lineQuestion.context.next, "");
-  assert.equal(gameAvailability(lines.slice(0, 2), ["Verse", "Verse"]).sections, false);
   assert.equal(gameAvailability(lines.slice(0, 2), ["Verse", "Verse"]).lines, true);
+  assert.equal(buildLesson(lines, "lines", seededRng(1), sections).some((question) => question.kind === "sections"), false);
+  assert.equal(buildLesson(lines, "lines", seededRng(1), sections).some((question) => question.kind === "intruder"), false);
 });
 
 test("line order slides in short windows and section order caps each round", () => {
@@ -175,16 +165,6 @@ test("line order slides in short windows and section order caps each round", () 
   assert.ok(longSection.every((question) => question.tokens.length <= 6));
   assert.equal(longSection[0].tokens.length, 5);
   assert.equal(longSection.reduce((sum, question) => sum + question.tokens.length, 0), 33);
-
-  const sectionLesson = buildLesson(lines, "sections", seededRng(3), flat).filter((question) => question.kind === "sections");
-  assert.ok(sectionLesson.length >= 2);
-  assert.ok(sectionLesson.every((question) => question.tokens.length <= 6 && question.tokens.length >= 2));
-  const eight = ["aa one", "bb two", "cc three", "dd four", "ee five", "ff six", "gg seven", "hh eight"];
-  const labels = ["North", "East", "South", "West", "Up", "Down", "Near", "Far"];
-  const rounds = buildLesson(eight, "sections", seededRng(4), labels).filter((question) => question.kind === "sections");
-  assert.equal(rounds.length, 2);
-  assert.ok(rounds.every((question) => question.tokens.length <= 6));
-  assert.equal(rounds.reduce((sum, question) => sum + question.tokens.length, 0), 8);
 });
 
 test("identical lines are interchangeable one tap at a time", () => {
@@ -243,7 +223,6 @@ test("answer checking ignores case, quotes, and punctuation, and the reveal keep
   assert.equal(gradeAnswer({ kind: "previous", answer: "beta three four" }, "Beta three four!"), true);
   assert.equal(gradeAnswer({ kind: "truth", answer: "True" }, "true"), true);
   assert.equal(gradeAnswer({ kind: "which", answer: "Chorus" }, "chorus"), true);
-  assert.equal(gradeAnswer({ kind: "intruder", answer: "zeta eleven twelve" }, "zeta, eleven twelve"), true);
   assert.equal(gradeAnswer({ kind: "letters", answer: "gamma five six" }, "Gamma five six"), true);
   assert.equal(gradeAnswer({ kind: "fill", answer: "glow" }, "Glow"), true);
   assert.equal(gradeAnswer({ kind: "swap", words: [{ id: "w0", wrong: false }, { id: "w1", wrong: true }] }, "w1"), true);
@@ -274,7 +253,7 @@ test("question types do not repeat more than twice in a row", () => {
   }
   const lines = ["alpha one two", "beta three four", "gamma five six", "delta seven eight", "epsilon nine ten", "zeta eleven twelve"];
   const sections = ["Verse", "Verse", "Chorus", "Chorus", "Bridge", "Bridge"];
-  for (const gameId of ["sections", "lines", "next", "concert"]) {
+  for (const gameId of ["lines", "next", "concert"]) {
     const lesson = buildLesson(lines, gameId, seededRng(4), sections);
     const kinds = lesson.map((question) => question.kind);
     for (let index = 2; index < kinds.length; index += 1) {
@@ -307,13 +286,51 @@ test("mastered rounds are skipped and the final run still covers them", () => {
   for (const question of concert) cursor += question.span || 1;
   assert.equal(cursor, lines.length);
   const rounds = { [full[0].roundId]: { mastered: true } };
-  const step = nextPractice(lines, sections, { rounds, chapters: { sections: true } });
+  const step = nextPractice(lines, sections, { rounds, chapters: {} });
   assert.equal(step.gameId, "lines");
   assert.notEqual(step.roundId, full[0].roundId);
   const progress = sectionProgress(lines, sections, rounds);
   assert.equal(progress[0].mastered, full[0].tokens.length);
   const plan = chapterPlan(lines, sections, {});
+  assert.equal(plan[0].id, "lines");
   assert.equal(plan[0].status, "open");
   assert.equal(plan[1].status, "locked");
-  assert.equal(chapterPlan(lines, sections, { sections: true })[1].status, "open");
+  assert.equal(plan.find((chapter) => chapter.id === "concert").status, "locked");
+  assert.equal(chapterPlan(lines, sections, { lines: true })[1].status, "open");
+  const mastered = {};
+  for (const question of full) mastered[question.learnId] = { mastered: true };
+  assert.equal(chapterPlan(lines, sections, {}, mastered).find((chapter) => chapter.id === "concert").status, "open");
+});
+
+test("a repeated chorus that differs only by punctuation is learned once", () => {
+  const lines = [
+    "paper boats along the stair",
+    "counting windows in the rain",
+    "carry the lantern upstairs",
+    "leave the quiet in the hall",
+    "spin the silver kitchen light",
+    "morning folded on the chair",
+    "tickets hidden in a book",
+    "carry the lantern upstairs?",
+    "leave the quiet in the hall",
+    "spin the silver kitchen light"
+  ];
+  const labels = [
+    "Verse 1", "Verse 1",
+    "Chorus", "Chorus", "Chorus",
+    "Verse 2", "Verse 2",
+    "Chorus", "Chorus", "Chorus"
+  ];
+  const blocks = sectionBlocks(lines, labels);
+  assert.deepEqual(blocks.map((block) => block.label), ["Verse 1", "Chorus", "Verse 2", "Chorus 2"]);
+  const lesson = buildLesson(lines, "lines", seededRng(1), labels).filter((question) => question.kind === "lines");
+  const chorusQuestions = lesson.filter((question) => question.roundLines.some((line) => line.includes("lantern upstairs")));
+  assert.equal(chorusQuestions.length, 1);
+  assert.equal(lesson.some((question) => question.kind === "intruder" || question.kind === "sections"), false);
+  const rounds = { [chorusQuestions[0].learnId]: { mastered: true } };
+  const progress = sectionProgress(lines, labels, rounds);
+  assert.equal(progress.find((section) => section.label === "Chorus").done, true);
+  assert.equal(progress.find((section) => section.label === "Chorus 2").done, true);
+  assert.equal(progress.find((section) => section.label === "Verse 1").done, false);
+  assert.equal(progress.find((section) => section.label === "Verse 2").done, false);
 });

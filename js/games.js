@@ -2,7 +2,6 @@ import { inferSections } from "./parse.js?v=7";
 import { contentKey, displayToken, mulberry32, normalizeAnswer, shuffle, tokenize, wordCount } from "./text.js?v=7";
 
 export const GAMES = [
-  { id: "sections", name: "Flow", detail: "Order each section's first line", group: "main" },
   { id: "lines", name: "Build", detail: "Line order in short rounds", group: "main" },
   { id: "next", name: "Next line", detail: "Recall what comes next", group: "main" },
   { id: "concert", name: "Final run", detail: "Timed run through the song", group: "main" },
@@ -12,7 +11,6 @@ export const GAMES = [
 ];
 
 export const CHAPTERS = [
-  { id: "sections", name: "Flow", detail: "Order each section's first line" },
   { id: "lines", name: "Build", detail: "Line order in short rounds" },
   { id: "next", name: "Next line", detail: "Recall what comes next" },
   { id: "concert", name: "Final run", detail: "Timed run through the song" }
@@ -88,14 +86,13 @@ export function gameAvailability(lines, sections = []) {
     next: list.length >= 3,
     letters: list.some((line) => tokenize(line).length >= 1),
     concert: list.length >= 1 && list.some((line) => tokenize(line).length >= 1),
-    sections: blocks.length >= 2,
     lines: blocks.some((block) => block.lines.length >= 2)
   };
 }
 
 export function firstLessonId(lines, sections = []) {
   const availability = gameAvailability(lines, sections);
-  for (const id of ["sections", "lines", "next", "fill", "letters", "order"]) {
+  for (const id of ["lines", "next", "fill", "letters", "order"]) {
     if (availability[id]) return id;
   }
   return "letters";
@@ -116,7 +113,7 @@ export function answersMatch(expected, given) {
 
 export function pointsFor({ kind, correct, combo, secondsLeft }) {
   if (!correct) return { xp: 0, score: 0 };
-  const base = { fill: 10, next: 10, order: 12, letters: 15, lines: 14, sections: 16, previous: 10, swap: 12, intruder: 12, which: 10, truth: 10 }[kind] || 10;
+  const base = { fill: 10, next: 10, order: 12, letters: 15, lines: 14, previous: 10, swap: 12, which: 10, truth: 10 }[kind] || 10;
   const xp = base + Math.min(10, Math.max(0, combo - 1) * 2);
   let score = 100 + combo * 10;
   if (typeof secondsLeft === "number") score += Math.max(0, Math.round(secondsLeft * 8));
@@ -185,33 +182,6 @@ function shuffleTokens(tokens, rng) {
   return shuffled;
 }
 
-function blockContext(lines, block, rangeLabel) {
-  return {
-    section: block?.label || "",
-    position: block ? block.start + 1 : 1,
-    total: lines.length,
-    previous: "",
-    next: "",
-    rangeLabel
-  };
-}
-
-function roundSizes(total, max) {
-  if (total <= max) return [total];
-  const sizes = [];
-  let left = total;
-  while (left > 0) {
-    if (left <= max) {
-      sizes.push(left);
-      break;
-    }
-    const take = left - max === 1 ? max - 1 : max;
-    sizes.push(take);
-    left -= take;
-  }
-  return sizes;
-}
-
 export function lineWindowSizes(total) {
   if (total < 2) return [];
   if (total <= 5) return [total];
@@ -235,47 +205,24 @@ function stampRounds(questions) {
   const seen = new Map();
   return questions.filter(Boolean).map((question) => {
     const parts = question.roundLines || [question.line || question.prompt || question.answer || ""];
-    const base = contentKey(parts);
-    const count = (seen.get(base) || 0) + 1;
-    seen.set(base, count);
-    return { ...question, roundId: count === 1 ? base : `${base}-${count}` };
+    const learnId = question.learnId || contentKey(parts);
+    const count = (seen.get(learnId) || 0) + 1;
+    seen.set(learnId, count);
+    const roundId = question.roundId || (count === 1 ? learnId : `${learnId}-${count}`);
+    return { ...question, learnId, roundId };
   });
 }
 
-function makeSectionOrder(lines, blocks, rng, rangeLabel) {
-  if (blocks.length < 2) return null;
-  const tokens = blocks.map((block) => ({
-    id: block.id,
-    text: block.lines[0] || block.label,
-    label: block.label
-  }));
-  return {
-    kind: "sections",
-    lineIndex: blocks[0].start,
-    line: blocks[0].lines[0] || "",
-    tokens,
-    shuffled: shuffleTokens(tokens, rng),
-    roundLines: tokens.map((token) => token.text),
-    context: blockContext(lines, null, rangeLabel)
-  };
-}
-
-function sectionQuestions(lines, sections, rng) {
-  const blocks = sectionBlocks(lines, sections);
-  if (blocks.length < 2) return [];
-  const sizes = roundSizes(blocks.length, 6);
-  const questions = [];
-  let offset = 0;
-  for (const size of sizes) {
-    const slice = blocks.slice(offset, offset + size);
-    const rangeLabel = sizes.length === 1
-      ? `${blocks.length} sections`
-      : `sections ${offset + 1}–${offset + size} of ${blocks.length}`;
-    const question = makeSectionOrder(lines, slice, rng, rangeLabel);
-    if (question) questions.push(question);
-    offset += size;
-  }
-  return questions;
+function collapseRepeatedRounds(questions) {
+  const seen = new Set();
+  return questions.filter((question) => {
+    const id = question.learnId || question.roundId;
+    if (!id || !seen.has(id)) {
+      if (id) seen.add(id);
+      return true;
+    }
+    return false;
+  });
 }
 
 function makeLineWindow(lines, block, start, end, rng) {
@@ -376,7 +323,6 @@ function makeByKind(kind, lines, sections, index, rng, span = 0) {
   if (kind === "swap") return makeSwap(lines, index, rng);
   if (kind === "truth") return makeTruth(lines, index, rng);
   if (kind === "which") return makeWhich(lines, sections, index, rng);
-  if (kind === "intruder") return makeIntruder(lines, sections, rng);
   if (kind === "lines") {
     const count = span || Math.min(3, lines.length - index);
     if (count < 2) return null;
@@ -406,16 +352,9 @@ function varied(lines, sections, rng, weights, count) {
   return made;
 }
 
-const FLOW_WEIGHTS = [
-  { type: "which", weight: 3 },
-  { type: "intruder", weight: 2 },
-  { type: "truth", weight: 2 },
-  { type: "next", weight: 1 }
-];
 const BUILD_WEIGHTS = [
   { type: "fill", weight: 2 },
   { type: "swap", weight: 2 },
-  { type: "intruder", weight: 2 },
   { type: "next", weight: 2 },
   { type: "previous", weight: 1 }
 ];
@@ -427,14 +366,8 @@ const NEXT_WEIGHTS = [
   { type: "which", weight: 1 }
 ];
 
-function flowLesson(lines, sections, rng) {
-  const backbone = sectionQuestions(lines, sections, rng).map((question) => withContext(question, lines, sections));
-  const fillers = varied(lines, sections, rng, FLOW_WEIGHTS, Math.max(1, Math.floor(backbone.length / 2)));
-  return interleave(backbone, fillers);
-}
-
 function lineLesson(lines, sections, rng, chunk) {
-  let backbone = lineQuestions(lines, sections, rng);
+  let backbone = collapseRepeatedRounds(stampRounds(lineQuestions(lines, sections, rng)));
   if (Number.isInteger(chunk)) {
     backbone = backbone.filter((question) => question.lineIndex === chunk);
     if (!backbone.length) {
@@ -505,15 +438,13 @@ function keepRounds(questions, options) {
     return picked.length ? picked : questions.filter((question) => question.roundId === only);
   }
   if (!skip.size) return questions;
-  const kept = questions.filter((question) => !question.roundId || !skip.has(question.roundId));
-  return kept;
+  return questions.filter((question) => !skip.has(question.roundId) && !(question.learnId && skip.has(question.learnId)));
 }
 
 export function buildLesson(lines, gameId, rng = Math.random, sections = [], options = {}) {
   const list = [...(lines || [])];
   const labels = sections || [];
-  if (gameId === "sections") return keepRounds(flowLesson(list, labels, rng), options);
-  if (gameId === "lines") return keepRounds(lineLesson(list, labels, rng, Number.isInteger(options.chunk) ? options.chunk : null), options);
+  if (gameId === "sections" || gameId === "lines") return keepRounds(lineLesson(list, labels, rng, Number.isInteger(options.chunk) ? options.chunk : null), options);
   if (gameId === "next") return keepRounds(nextLesson(list, labels, rng), options);
   if (gameId === "concert") return finalRun(list, labels, rng);
   const eligible = list.map((_, index) => index).filter((index) => canAsk(list, index, gameId));
@@ -521,10 +452,19 @@ export function buildLesson(lines, gameId, rng = Math.random, sections = [], opt
   return stampRounds(shuffle(eligible, rng).slice(0, count).map((index) => withContext(makeQuestion(list, index, gameId, rng), list, labels)).filter(Boolean));
 }
 
-export function chapterPlan(lines, sections = [], cleared = {}) {
+export function chapterPlan(lines, sections = [], cleared = {}, rounds = null) {
   const availability = gameAvailability(lines, sections);
+  const sectionReady = sectionsComplete(lines, sections, rounds || {});
   let waiting = false;
   return CHAPTERS.map((chapter) => {
+    if (chapter.id === "concert") {
+      const done = Boolean(cleared.concert);
+      let status = "open";
+      if (!availability.concert) status = "unavailable";
+      else if (done) status = "done";
+      else if (!sectionReady) status = "locked";
+      return { ...chapter, status, done: status === "done" };
+    }
     const playable = Boolean(availability[chapter.id]);
     const done = Boolean(cleared[chapter.id]);
     let status = "open";
@@ -537,27 +477,20 @@ export function chapterPlan(lines, sections = [], cleared = {}) {
 }
 
 function unfinished(questions, rounds) {
-  return questions.find((question) => question.roundId && !rounds[question.roundId]?.mastered);
+  return questions.find((question) => question.roundId && !roundMastered(rounds, question));
 }
 
 export function nextPractice(lines, sections = [], { rounds = {}, chapters = {} } = {}) {
-  const flow = flowLesson(lines, sections, () => 0.5);
   const build = lineLesson(lines, sections, () => 0.5, null);
   const recall = nextLesson(lines, sections, () => 0.5);
-  const flowDone = !unfinished(flow, rounds);
   const buildDone = !unfinished(build, rounds);
   const recallDone = !unfinished(recall, rounds);
   const plan = chapterPlan(lines, sections, {
     ...chapters,
-    sections: chapters.sections || flowDone,
     lines: chapters.lines || buildDone,
     next: chapters.next || recallDone
-  });
+  }, rounds);
   const playable = (id) => plan.find((chapter) => chapter.id === id)?.status === "open";
-  if (playable("sections")) {
-    const question = unfinished(flow, rounds);
-    if (question) return { gameId: "sections", roundId: question.roundId };
-  }
   if (playable("lines")) {
     const question = unfinished(build, rounds);
     if (question) return { gameId: "lines", roundId: question.roundId };
@@ -567,6 +500,15 @@ export function nextPractice(lines, sections = [], { rounds = {}, chapters = {} 
     if (question) return { gameId: "next", roundId: question.roundId };
   }
   return { gameId: "concert" };
+}
+
+function roundMastered(rounds, question) {
+  return Boolean(rounds[question.roundId]?.mastered || rounds[question.learnId]?.mastered);
+}
+
+export function sectionsComplete(lines, sections = [], rounds = {}) {
+  const practice = sectionProgress(lines, sections, rounds).filter((block) => block.practice);
+  return practice.every((block) => block.done);
 }
 
 export function sectionProgress(lines, sections = [], rounds = {}) {
@@ -584,9 +526,10 @@ export function sectionProgress(lines, sections = [], rounds = {}) {
     const stamped = stampRounds(questions);
     let mastered = 0;
     for (const question of stamped) {
-      if (rounds[question.roundId]?.mastered) mastered += question.roundLines.length;
+      if (roundMastered(rounds, question)) mastered += question.roundLines.length;
     }
-    const again = stamped.find((question) => rounds[question.roundId]?.mastered);
+    const again = stamped.find((question) => roundMastered(rounds, question));
+    const pending = stamped.find((question) => !roundMastered(rounds, question));
     return {
       id: block.id,
       label: block.label,
@@ -594,8 +537,10 @@ export function sectionProgress(lines, sections = [], rounds = {}) {
       start: block.start,
       total: block.lines.length,
       mastered,
-      roundId: (stamped.find((question) => !rounds[question.roundId]?.mastered) || again || {}).roundId || "",
-      done: block.lines.length > 0 && mastered >= block.lines.length
+      practice: stamped.length > 0,
+      roundId: (pending || again || {}).roundId || "",
+      learnId: (pending || again || {}).learnId || "",
+      done: stamped.length > 0 && mastered >= block.lines.length
     };
   });
 }
@@ -766,26 +711,6 @@ function makeWhich(lines, sections, index, rng) {
     choices,
     span: 1,
     roundLines: [lines[index]]
-  };
-}
-
-function makeIntruder(lines, sections, rng) {
-  const blocks = sectionBlocks(lines, sections).filter((block) => block.lines.length);
-  if (blocks.length < 2) return null;
-  const home = blocks[Math.floor(rng() * blocks.length)];
-  const others = blocks.filter((block) => block.id !== home.id);
-  const foreign = others[Math.floor(rng() * others.length)];
-  const keep = shuffle([...home.lines], rng).slice(0, 3);
-  const intruder = foreign.lines[Math.floor(rng() * foreign.lines.length)];
-  if (keep.some((line) => normalizeAnswer(line) === normalizeAnswer(intruder))) return null;
-  return {
-    kind: "intruder",
-    lineIndex: home.start,
-    line: keep[0],
-    choices: shuffle([...keep, intruder], rng),
-    answer: intruder,
-    span: 1,
-    roundLines: keep
   };
 }
 
