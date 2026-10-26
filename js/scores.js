@@ -1,6 +1,6 @@
-import { bestSongMatch, concertsForSong } from "./concerts.js?v=5";
-import { songStats } from "./progress.js?v=5";
-import { clip, safeConcertId, songKey } from "./text.js?v=5";
+import { bestSongMatch, concertsForSong } from "./concerts.js?v=6";
+import { songStats } from "./progress.js?v=6";
+import { clip, safeConcertId, songKey } from "./text.js?v=6";
 
 const GAMES = new Set(["fill", "order", "next", "letters", "concert", "sections", "lines"]);
 export const REMOTE_SCORE_KEYS = ["player_name", "concert", "song_title", "artist", "score"];

@@ -19,26 +19,29 @@ export function drawShareCard(card) {
   canvas.width = 1080;
   canvas.height = 1080;
   const ctx = canvas.getContext("2d");
-  const accent = card.kind === "concert" ? "#2c587f" : "#8d3a58";
-  ctx.fillStyle = "#f4f0ea";
+  const band = card.kind === "concert" ? "#5e212f" : "#382b6f";
+  const stripe = card.kind === "concert" ? "#ff4d6d" : "#7c5cff";
+  ctx.fillStyle = "#0b0b0f";
   ctx.fillRect(0, 0, 1080, 1080);
-  ctx.fillStyle = accent;
+  ctx.fillStyle = band;
   ctx.fillRect(0, 0, 1080, 460);
+  ctx.fillStyle = stripe;
+  ctx.fillRect(0, 452, 1080, 8);
 
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = "#f5f5f7";
   ctx.font = "600 28px Inter, sans-serif";
   ctx.fillText("Know the Verse", 96, 120);
 
-  ctx.font = "600 64px Inter, sans-serif";
+  ctx.font = "800 64px Inter Tight, Inter, sans-serif";
   const titleLines = wrapText(ctx, card.title || "Score", 888).slice(0, 2);
   titleLines.forEach((line, index) => ctx.fillText(line, 96, 230 + index * 80));
 
-  ctx.fillStyle = "#1d1a22";
-  ctx.font = "600 148px Inter, sans-serif";
+  ctx.fillStyle = "#f5f5f7";
+  ctx.font = "800 148px Inter Tight, Inter, sans-serif";
   ctx.fillText(String(Math.max(0, Math.round(Number(card.score) || 0))), 96, 640);
 
   ctx.font = "600 36px Inter, sans-serif";
-  ctx.fillStyle = "#5e5668";
+  ctx.fillStyle = "#a1a1aa";
   let y = 720;
   if (card.kind === "concert") {
     ctx.fillText("Concert score", 96, y);

@@ -148,6 +148,104 @@ test("a copied page keeps the longest lyric block and drops chrome", () => {
   assert.deepEqual(cleaned.sections, ["Verse 1", "Verse 1", "Chorus", "Chorus", "Chorus"]);
 });
 
+const UNBROKEN = [
+  "amber lanterns on the stair",
+  "carry the lantern upstairs?",
+  "the hallway kept a quiet glow",
+  "we counted tiles and let it go",
+  "you feel like cotton weather",
+  "you feel like cotton weather",
+  "you feel like cotton weather",
+  "(nothing in the kitchen ever burns me)",
+  "the kettle hummed a softer tune",
+  "carry the lantern upstairs",
+  "windows fogged a silver moon",
+  "we left the coats beside the broom",
+  "you feel like cotton weather",
+  "you feel like cotton weather",
+  "you feel like cotton weather?",
+  "say it once and leave the light",
+  "the porch can hold it for the night",
+  "you feel like cotton weather",
+  "you feel like cotton weather",
+  "you feel like cotton weather"
+];
+const UNBROKEN_SECTIONS = [
+  "Verse 1", "Verse 1", "Verse 1", "Verse 1",
+  "Chorus", "Chorus", "Chorus", "Chorus",
+  "Verse 2", "Verse 2", "Verse 2", "Verse 2",
+  "Chorus", "Chorus", "Chorus",
+  "Bridge", "Bridge",
+  "Chorus", "Chorus", "Chorus"
+];
+
+test("a paste with no blank lines or tags is split by a repeated chorus", () => {
+  const parsed = analyzePaste(UNBROKEN.join("\n"), { detectTitle: false });
+  assert.deepEqual(parsed.lines, UNBROKEN);
+  assert.deepEqual(parsed.sections, UNBROKEN_SECTIONS);
+});
+
+test("a paste with no repetition falls back to four-line parts", () => {
+  const lines = Array.from({ length: 10 }, (_, index) => `unique marble line ${index} extra`);
+  const parsed = analyzePaste(lines.join("\n"), { detectTitle: false });
+  assert.deepEqual(parsed.lines, lines);
+  assert.deepEqual(parsed.sections, [
+    "Part 1", "Part 1", "Part 1", "Part 1",
+    "Part 2", "Part 2", "Part 2", "Part 2",
+    "Part 3", "Part 3"
+  ]);
+});
+
+test("repeated block starts and plain-text gaps become stanza breaks", () => {
+  const repeated = analyzePaste([
+    "amber lanterns on the stair",
+    "we counted tiles and let it go",
+    "windows fogged a silver moon",
+    "amber lanterns on the stair",
+    "the porch can hold the light",
+    "coats were waiting by the broom"
+  ].join("\n"), { detectTitle: false });
+  assert.deepEqual(repeated.sections, ["Part 1", "Part 1", "Part 1", "Part 2", "Part 2", "Part 2"]);
+
+  const spaced = analyzePaste("alpha one two  beta three four\ngamma five six", { detectTitle: false });
+  assert.deepEqual(spaced.lines, ["alpha one two", "beta three four", "gamma five six"]);
+  assert.deepEqual(spaced.sections, ["Part 1", "Part 2", "Part 2"]);
+
+  const separators = analyzePaste("alpha one two\u2028beta three four\u2028\u2028gamma five six", { detectTitle: false });
+  assert.deepEqual(separators.sections, ["Part 1", "Part 1", "Part 2"]);
+
+  const crlf = analyzePaste("alpha one two\r\nbeta three four\r\n\r\ngamma five six", { detectTitle: false });
+  assert.deepEqual(crlf.sections, ["Part 1", "Part 1", "Part 2"]);
+
+  const mixed = analyzePaste("alpha one two\nbeta three four\r\ngamma five six\ndelta seven eight", { detectTitle: false });
+  assert.deepEqual(mixed.sections, ["Part 1", "Part 1", "Part 2", "Part 2"]);
+});
+
+test("html stanza blocks keep breaks and drop the panel junk", () => {
+  const stanza = (lines) => `<div>${lines.map((line) => `<span>${line}</span>`).join("<br>")}</div>`;
+  const html = [
+    "<div>",
+    stanza(UNBROKEN.slice(0, 4)),
+    stanza(UNBROKEN.slice(4, 8)),
+    stanza(UNBROKEN.slice(8, 12)),
+    stanza(UNBROKEN.slice(12, 15)),
+    stanza(UNBROKEN.slice(15, 17)),
+    stanza(UNBROKEN.slice(17)),
+    "<div>Source: Example Notes</div>",
+    "<div>Songwriters: A. Person</div>",
+    "<div>Released: 2019</div>",
+    "<div>Album: Paper Moon</div>",
+    "<div>Listen</div>",
+    "<div>People also search for</div>",
+    "<div>Feedback</div>",
+    "</div>"
+  ].join("");
+  const parsed = cleanPastedPage(html, { detectTitle: false, title: "Paper Moonfish", artist: "House Band" });
+  assert.deepEqual(parsed.lines, UNBROKEN);
+  assert.deepEqual(parsed.sections, UNBROKEN_SECTIONS);
+  assert.equal(parsed.lines.some((line) => /source|songwriter|feedback|listen/i.test(line)), false);
+});
+
 test("find lyrics is only a web search link", () => {
   const url = new URL(searchLyricsUrl("Paper Moonfish", "House Band"));
   assert.equal(url.origin, "https://www.google.com");

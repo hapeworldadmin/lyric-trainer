@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import {
   answersMatch,
   buildLesson,
   firstLessonId,
   gameAvailability,
   isOrderCorrect,
+  judgeOrderTap,
   lessonBonus,
   lineContext,
   pointsFor,
@@ -119,8 +121,70 @@ test("section order and line order check ids, and repeated sections stay distinc
   assert.equal(isOrderCorrect(lineQuestion, lineQuestion.tokens.map((token) => token.id)), true);
   assert.equal(isOrderCorrect(lineQuestion, [...lineQuestion.tokens].reverse().map((token) => token.id)), false);
   assert.match(lineQuestion.context.rangeLabel, /lines 3–4 of 4/);
+  assert.equal(lineQuestion.context.previous, lines[1]);
+  assert.equal(lineQuestion.context.next, "");
   assert.equal(gameAvailability(lines.slice(0, 2), ["Verse", "Verse"]).sections, false);
   assert.equal(gameAvailability(lines.slice(0, 2), ["Verse", "Verse"]).lines, true);
+});
+
+test("line order slides in short windows and section order caps each round", () => {
+  const lines = Array.from({ length: 33 }, (_, index) => `lantern line number ${index} here`);
+  const flat = lines.map(() => "Part 1");
+  const lineLesson = buildLesson(lines, "lines", seededRng(1), flat);
+  assert.ok(lineLesson.length > 1);
+  assert.ok(lineLesson.every((question) => question.tokens.length >= 2 && question.tokens.length <= 6));
+  assert.equal(lineLesson.reduce((sum, question) => sum + question.tokens.length, 0), 33);
+  assert.equal(lineLesson[0].context.previous, "");
+  assert.equal(lineLesson[1].context.previous, lineLesson[0].tokens.at(-1).text);
+  assert.equal(lineLesson[0].context.next, "");
+  const covered = lineLesson.flatMap((question) => question.tokens.map((token) => token.text));
+  assert.deepEqual(covered, lines);
+
+  const longSection = buildLesson(lines, "lines", seededRng(2), lines.map(() => "Chorus"));
+  assert.ok(longSection.every((question) => question.tokens.length <= 6));
+  assert.equal(longSection[0].tokens.length, 5);
+  assert.equal(longSection.reduce((sum, question) => sum + question.tokens.length, 0), 33);
+
+  const sectionLesson = buildLesson(lines, "sections", seededRng(3), flat);
+  assert.ok(sectionLesson.length >= 2);
+  assert.ok(sectionLesson.every((question) => question.tokens.length <= 6 && question.tokens.length >= 2));
+  const eight = ["aa one", "bb two", "cc three", "dd four", "ee five", "ff six", "gg seven", "hh eight"];
+  const labels = ["North", "East", "South", "West", "Up", "Down", "Near", "Far"];
+  const rounds = buildLesson(eight, "sections", seededRng(4), labels);
+  assert.equal(rounds.length, 2);
+  assert.ok(rounds.every((question) => question.tokens.length <= 6));
+  assert.equal(rounds.reduce((sum, question) => sum + question.tokens.length, 0), 8);
+});
+
+test("identical lines are interchangeable one tap at a time", () => {
+  const question = {
+    kind: "lines",
+    tokens: [
+      { id: "a", text: "same cotton weather" },
+      { id: "b", text: "same cotton weather" },
+      { id: "c", text: "Same cotton weather!" },
+      { id: "d", text: "leave the porch light" }
+    ]
+  };
+  assert.equal(isOrderCorrect(question, ["a", "b", "c", "d"]), true);
+  assert.equal(isOrderCorrect(question, ["c", "a", "b", "d"]), true);
+  assert.equal(isOrderCorrect(question, ["b", "a", "c", "d"]), true);
+  assert.equal(isOrderCorrect(question, ["a", "d", "b", "c"]), false);
+  assert.equal(judgeOrderTap(question, [], "c"), true);
+  assert.equal(judgeOrderTap(question, [], "d"), false);
+  assert.equal(judgeOrderTap(question, ["c"], "a"), true);
+  assert.equal(judgeOrderTap(question, ["c"], "d"), false);
+  assert.equal(judgeOrderTap(question, ["a", "b", "c"], "d"), true);
+  assert.equal(judgeOrderTap(question, ["a"], "a"), false);
+});
+
+test("order taps flash a color and the shake is an animation reduced motion can drop", async () => {
+  const css = await readFile(new URL("../css/app.css", import.meta.url), "utf8");
+  assert.match(css, /\.token\.is-reject[\s\S]*#ff4d6d/i);
+  assert.match(css, /\.token\.is-accept[\s\S]*#34d399|var\(--good\)/);
+  assert.match(css, /@keyframes token-shake/);
+  assert.match(css, /prefers-reduced-motion:\s*reduce/);
+  assert.match(css, /animation:\s*none\s*!important/);
 });
 
 test("next line needs three lines and points include combo and time", () => {

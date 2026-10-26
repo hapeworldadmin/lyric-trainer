@@ -1,4 +1,5 @@
-import { displayToken, mulberry32, normalizeAnswer, shuffle, tokenize } from "./text.js?v=5";
+import { inferSections } from "./parse.js?v=6";
+import { displayToken, mulberry32, normalizeAnswer, shuffle, tokenize } from "./text.js?v=6";
 
 export const GAMES = [
   { id: "sections", name: "Section order", detail: "Arrange the sections", group: "main" },
@@ -17,7 +18,7 @@ export const CONCERT_SECONDS = 12;
 
 export function sectionBlocks(lines, sections = []) {
   const list = lines || [];
-  const labels = sections || [];
+  const labels = inferSections(list, sections);
   const raw = [];
   let start = 0;
   const nameAt = (index) => String(labels[index] || "").trim();
@@ -129,8 +130,39 @@ function blockContext(lines, block, rangeLabel) {
   };
 }
 
-function makeSectionOrder(lines, sections, rng) {
-  const blocks = sectionBlocks(lines, sections);
+function roundSizes(total, max) {
+  if (total <= max) return [total];
+  const sizes = [];
+  let left = total;
+  while (left > 0) {
+    if (left <= max) {
+      sizes.push(left);
+      break;
+    }
+    const take = left - max === 1 ? max - 1 : max;
+    sizes.push(take);
+    left -= take;
+  }
+  return sizes;
+}
+
+function lineWindowSizes(total) {
+  if (total < 2) return [];
+  if (total <= 6) return [total];
+  const sizes = [];
+  let left = total;
+  while (left > 6) {
+    sizes.push(5);
+    left -= 5;
+  }
+  if (left === 1 && sizes.length) {
+    sizes[sizes.length - 1] = 4;
+    sizes.push(2);
+  } else if (left) sizes.push(left);
+  return sizes;
+}
+
+function makeSectionOrder(lines, blocks, rng, rangeLabel) {
   if (blocks.length < 2) return null;
   const tokens = blocks.map((block) => ({ id: block.id, text: block.label }));
   return {
@@ -139,36 +171,71 @@ function makeSectionOrder(lines, sections, rng) {
     line: blocks[0].lines[0] || "",
     tokens,
     shuffled: shuffleTokens(tokens, rng),
-    context: blockContext(lines, null, `${blocks.length} sections`)
+    context: blockContext(lines, null, rangeLabel)
   };
 }
 
-function makeLineOrder(lines, block, rng) {
-  const tokens = block.lines.map((text, index) => ({ id: `l${block.start + index}`, text }));
+function sectionQuestions(lines, sections, rng) {
+  const blocks = sectionBlocks(lines, sections);
+  if (blocks.length < 2) return [];
+  const sizes = roundSizes(blocks.length, 6);
+  const questions = [];
+  let offset = 0;
+  for (const size of sizes) {
+    const slice = blocks.slice(offset, offset + size);
+    const rangeLabel = sizes.length === 1
+      ? `${blocks.length} sections`
+      : `sections ${offset + 1}–${offset + size} of ${blocks.length}`;
+    const question = makeSectionOrder(lines, slice, rng, rangeLabel);
+    if (question) questions.push(question);
+    offset += size;
+  }
+  return questions;
+}
+
+function makeLineWindow(lines, block, start, end, rng) {
+  const tokens = [];
+  for (let index = start; index < end; index += 1) {
+    tokens.push({ id: `l${index}`, text: lines[index] });
+  }
   if (tokens.length < 2) return null;
-  const end = block.end;
   return {
     kind: "lines",
-    lineIndex: block.start,
-    line: block.lines[0] || "",
+    lineIndex: start,
+    line: lines[start] || "",
     tokens,
     shuffled: shuffleTokens(tokens, rng),
-    context: blockContext(lines, block, `${block.label} · lines ${block.start + 1}–${end} of ${lines.length}`)
+    context: {
+      section: block.label,
+      position: start + 1,
+      total: lines.length,
+      previous: start > 0 ? lines[start - 1] : "",
+      next: "",
+      rangeLabel: `${block.label} · lines ${start + 1}–${end} of ${lines.length}`
+    }
   };
+}
+
+function lineQuestions(lines, sections, rng) {
+  const questions = [];
+  for (const block of sectionBlocks(lines, sections)) {
+    if (block.lines.length < 2) continue;
+    let offset = 0;
+    for (const size of lineWindowSizes(block.lines.length)) {
+      const start = block.start + offset;
+      const question = makeLineWindow(lines, block, start, start + size, rng);
+      if (question) questions.push(question);
+      offset += size;
+    }
+  }
+  return questions;
 }
 
 export function buildLesson(lines, gameId, rng = Math.random, sections = []) {
   const list = [...(lines || [])];
   const labels = sections || [];
-  if (gameId === "sections") {
-    const question = makeSectionOrder(list, labels, rng);
-    return question ? [question] : [];
-  }
-  if (gameId === "lines") {
-    const blocks = sectionBlocks(list, labels).filter((block) => block.lines.length >= 2);
-    const count = Math.min(LESSON_LENGTH, blocks.length);
-    return shuffle(blocks, rng).slice(0, count).map((block) => makeLineOrder(list, block, rng)).filter(Boolean);
-  }
+  if (gameId === "sections") return sectionQuestions(list, labels, rng);
+  if (gameId === "lines") return lineQuestions(list, labels, rng);
   if (gameId === "concert") {
     return list.map((_, index) => {
       const prefer = index % 2 === 0 ? "fill" : "letters";
@@ -305,6 +372,27 @@ export function seededRng(seed) {
 }
 
 export function isOrderCorrect(question, arrangedIds) {
-  const expected = (question.tokens || []).map((token) => token.id).join("\n");
-  return expected.length > 0 && arrangedIds.join("\n") === expected;
+  const tokens = question?.tokens || [];
+  if (!tokens.length || arrangedIds?.length !== tokens.length) return false;
+  const byId = new Map(tokens.map((token) => [token.id, token]));
+  const seen = new Set();
+  for (let index = 0; index < arrangedIds.length; index += 1) {
+    const id = arrangedIds[index];
+    if (seen.has(id)) return false;
+    const token = byId.get(id);
+    if (!token) return false;
+    seen.add(id);
+    const expected = normalizeAnswer(tokens[index].text);
+    if (!expected || expected !== normalizeAnswer(token.text)) return false;
+  }
+  return true;
+}
+
+export function judgeOrderTap(question, placedIds, candidateId) {
+  const tokens = question?.tokens || [];
+  const placed = placedIds || [];
+  const token = tokens.find((item) => item.id === candidateId);
+  if (!token || placed.includes(candidateId) || placed.length >= tokens.length) return false;
+  const expected = normalizeAnswer(tokens[placed.length].text);
+  return expected.length > 0 && expected === normalizeAnswer(token.text);
 }
