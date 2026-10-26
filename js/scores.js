@@ -1,4 +1,4 @@
-import { concertsForSong } from "./concerts.js";
+import { bestSongMatch, concertsForSong } from "./concerts.js";
 import { songStats } from "./progress.js";
 import { clip, safeConcertId, songKey } from "./text.js";
 
@@ -48,7 +48,7 @@ export function createDeviceProvider(getState, saveState) {
         const progress = state.progress?.[player.id];
         if (!progress) continue;
         for (const slot of concert?.setlist || []) {
-          const song = (state.songs || []).find((candidate) => songKey(candidate.title, candidate.artist) === songKey(slot.title, slot.artist));
+          const song = bestSongMatch(state.songs, slot.title, slot.artist);
           if (!song) continue;
           const stats = songStats(progress, song);
           if (stats.bestScore <= 0) continue;

@@ -25,6 +25,29 @@ export function songKey(title, artist) {
   return `${normalizeAnswer(title)}|${normalizeAnswer(artist)}`;
 }
 
+// Identity for linking a pasted song to a setlist slot. Case, punctuation, and
+// a parenthetical tag are ignored, so "ILYSB" matches "ILYSB (Stripped)" and
+// "Cause You Have To" matches "'Cause You Have To". Extra words still count,
+// so "Good" does not match "Good Girls".
+export function normalizeTitle(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function songsMatch(titleA, artistA, titleB, artistB) {
+  const title = normalizeTitle(titleA);
+  const artist = normalizeTitle(artistA);
+  return Boolean(title && artist)
+    && title === normalizeTitle(titleB)
+    && artist === normalizeTitle(artistB);
+}
+
 export function lineKey(line) {
   const text = normalizeAnswer(line);
   let hash = 5381;

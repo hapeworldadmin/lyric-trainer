@@ -5,7 +5,41 @@
     {
       "id": "lany-soft-world-tour",
       "name": "LANY Soft World Tour",
-      "setlist": []
+      "label": "Standard Asia Tour setlist",
+      "source": "https://www.setlist.fm/setlist/lany/2026/echo-land-music-park-shanghai-china-3b7feca4.html",
+      "setlist": [
+        { "title": "Soft", "artist": "LANY" },
+        { "title": "Why", "artist": "LANY" },
+        { "title": "Make Me Forget", "artist": "LANY" },
+        { "title": "ex i never had", "artist": "LANY" },
+        { "title": "up to me", "artist": "LANY" },
+        { "title": "you!", "artist": "LANY" },
+        { "title": "If You See Her", "artist": "LANY" },
+        { "title": "I Don't Wanna Love You Anymore", "artist": "LANY" },
+        { "title": "Prettiest Thing I've Ever Seen", "artist": "LANY" },
+        { "title": "Thick and Thin", "artist": "LANY" },
+        { "title": "dna", "artist": "LANY" },
+        { "title": "Know You Naked", "artist": "LANY" },
+        { "title": "When Did You Stop Loving Me?", "artist": "LANY" },
+        { "title": "anything 4 u", "artist": "LANY" },
+        { "title": "Stuck", "artist": "LANY" },
+        { "title": "Sound of Rain", "artist": "LANY" },
+        { "title": "Good Parts", "artist": "LANY" },
+        { "title": "Let Me Know", "artist": "LANY" },
+        { "title": "Super Far", "artist": "LANY" },
+        { "title": "Mean It", "artist": "LANY" },
+        { "title": "Last Forever", "artist": "LANY" },
+        { "title": "Act My Age", "artist": "LANY" },
+        { "title": "13", "artist": "LANY" },
+        { "title": "Good Girls", "artist": "LANY" },
+        { "title": "ILYSB (Stripped)", "artist": "LANY" },
+        { "title": "pink skies", "artist": "LANY" },
+        { "title": "Destiny", "artist": "LANY" },
+        { "title": "Alonica", "artist": "LANY" },
+        { "title": "'Cause You Have To", "artist": "LANY" },
+        { "title": "Malibu Nights", "artist": "LANY" },
+        { "title": "XXL", "artist": "LANY" }
+      ]
     }
   ]
 }

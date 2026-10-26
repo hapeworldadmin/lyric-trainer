@@ -35,7 +35,7 @@ import {
   saveState,
   seedSample
 } from "./storage.js";
-import { clip, escapeHtml, normalizeAnswer, songKey, uid } from "./text.js";
+import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js";
 
 const session = {
   state: null,
@@ -530,6 +530,7 @@ function viewConcerts() {
         <div class="ticket-body">
           <p class="kicker">Concert</p>
           <h3>${escapeHtml(concert.name)}</h3>
+          ${concert.label ? `<p class="artist">${escapeHtml(concert.label)}</p>` : ""}
           <p class="meta">${progressLabel}${summary.total ? ` · Score ${formatScore(summary.score)}` : ""}</p>
         </div>
         <div class="ticket-stub">Open</div>
@@ -580,6 +581,8 @@ async function viewConcert() {
         <a class="back" href="#/concerts">${icon("back")} Concerts</a>
         <p class="eyebrow">Concert</p>
         <h1>${escapeHtml(concert.name)}</h1>
+        ${concert.label ? `<p class="lede" data-testid="concert-label">${escapeHtml(concert.label)}</p>` : ""}
+        ${concert.source ? `<p class="hint"><a class="text-link" data-testid="concert-source" href="${escapeHtml(concert.source)}" target="_blank" rel="noopener noreferrer">Source setlist</a></p>` : ""}
       </div>
       <div class="stat-grid">
         <div class="stat"><strong data-testid="concert-mastered">${fraction}</strong><span>songs mastered</span></div>
@@ -624,7 +627,7 @@ async function viewBoard() {
   const concert = session.concerts.find((item) => item.id === selected);
   const visible = runs.filter((run) => {
     if (!concert) return true;
-    return concert.setlist.some((slot) => songKey(slot.title, slot.artist) === run.songKey);
+    return concert.setlist.some((slot) => songsMatch(slot.title, slot.artist, run.songTitle, run.songArtist));
   }).sort((a, b) => b.score - a.score || b.createdAt.localeCompare(a.createdAt)).slice(0, 30);
   const rows = visible.length ? visible.map((run, index) => `
     <article class="board-row" data-testid="board-row">

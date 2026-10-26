@@ -1,19 +1,91 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { activeConcertSummary, leaderboardFromSongScores, linkSetlist, normalizeConcerts } from "../js/concerts.js";
+import { activeConcertSummary, concertsForSong, leaderboardFromSongScores, linkSetlist, normalizeConcerts } from "../js/concerts.js";
 import { emptyProgress, recordLineResult, recordRun } from "../js/progress.js";
 import { SAMPLE_SONG } from "../js/sample.js";
 import { createDeviceProvider, createScoreProvider, createSupabaseProvider, REMOTE_SCORE_KEYS } from "../js/scores.js";
 
-test("ships the placeholder concert with titles and artists only", () => {
+const ASIA_TITLES = [
+  "Soft",
+  "Why",
+  "Make Me Forget",
+  "ex i never had",
+  "up to me",
+  "you!",
+  "If You See Her",
+  "I Don't Wanna Love You Anymore",
+  "Prettiest Thing I've Ever Seen",
+  "Thick and Thin",
+  "dna",
+  "Know You Naked",
+  "When Did You Stop Loving Me?",
+  "anything 4 u",
+  "Stuck",
+  "Sound of Rain",
+  "Good Parts",
+  "Let Me Know",
+  "Super Far",
+  "Mean It",
+  "Last Forever",
+  "Act My Age",
+  "13",
+  "Good Girls",
+  "ILYSB (Stripped)",
+  "pink skies",
+  "Destiny",
+  "Alonica",
+  "'Cause You Have To",
+  "Malibu Nights",
+  "XXL"
+];
+
+const SETLIST_SOURCE = "https://www.setlist.fm/setlist/lany/2026/echo-land-music-park-shanghai-china-3b7feca4.html";
+
+test("ships the Asia tour setlist with titles and artists only", () => {
   const file = JSON.parse(readFileSync(new URL("../concerts.json", import.meta.url), "utf8"));
   const concerts = normalizeConcerts(file);
   assert.equal(concerts.length, 1);
   assert.equal(concerts[0].id, "lany-soft-world-tour");
   assert.equal(concerts[0].name, "LANY Soft World Tour");
-  assert.deepEqual(concerts[0].setlist, []);
+  assert.equal(concerts[0].label, "Standard Asia Tour setlist");
+  assert.equal(concerts[0].source, SETLIST_SOURCE);
+  assert.deepEqual(concerts[0].setlist.map((slot) => slot.title), ASIA_TITLES);
+  assert.ok(concerts[0].setlist.every((slot) => slot.artist === "LANY"));
+  assert.equal(concerts[0].setlist.some((slot) => "lyrics" in slot || "lines" in slot), false);
   for (const line of SAMPLE_SONG.lines) assert.equal(JSON.stringify(file).includes(line), false);
+});
+
+test("pasted songs match setlist titles despite case, punctuation, and parentheticals", () => {
+  const concert = normalizeConcerts(JSON.parse(readFileSync(new URL("../concerts.json", import.meta.url), "utf8")))[0];
+  const songs = [
+    { id: "ilysb", title: "ILYSB", artist: "lany", lines: ["line one"] },
+    { id: "cause", title: "Cause You Have To", artist: "LANY", lines: ["line one"] },
+    { id: "you", title: "YOU", artist: "Lany", lines: ["line one"] },
+    { id: "good", title: "Good", artist: "LANY", lines: ["line one"] },
+    { id: "soft-other", title: "Soft", artist: "Other Band", lines: ["line one"] }
+  ];
+  const slots = linkSetlist(concert, songs, emptyProgress());
+  const slot = (title) => slots.find((item) => item.title === title);
+  assert.equal(slot("ILYSB (Stripped)").status, "ready");
+  assert.equal(slot("ILYSB (Stripped)").songId, "ilysb");
+  assert.equal(slot("'Cause You Have To").status, "ready");
+  assert.equal(slot("'Cause You Have To").songId, "cause");
+  assert.equal(slot("you!").status, "ready");
+  assert.equal(slot("you!").songId, "you");
+  assert.equal(slot("Good Girls").status, "needs-lyrics");
+  assert.equal(slot("Good Parts").status, "needs-lyrics");
+  assert.equal(slot("Soft").status, "needs-lyrics");
+  assert.equal(concertsForSong([concert], "ilysb", "LANY").length, 1);
+  assert.equal(concertsForSong([concert], "Soft", "Other Band").length, 0);
+
+  const board = leaderboardFromSongScores([
+    { playerName: "Alex", songTitle: "ILYSB", songArtist: "lany", score: 40 },
+    { playerName: "Alex", songTitle: "Cause You Have To", songArtist: "LANY", score: 10 },
+    { playerName: "Alex", songTitle: "Good", songArtist: "LANY", score: 99 },
+    { playerName: "Alex", songTitle: "Soft", songArtist: "Other Band", score: 80 }
+  ], concert.setlist);
+  assert.deepEqual(board.map((row) => [row.playerName, row.score, row.played]), [["Alex", 50, 2]]);
 });
 
 test("setlist slots need lyrics until a pasted song matches, then they link", () => {

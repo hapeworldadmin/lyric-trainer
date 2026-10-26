@@ -44,9 +44,9 @@ A concert is a setlist folder. The list lives in [`concerts.json`](concerts.json
 }
 ```
 
-The app ships with one placeholder concert, **LANY Soft World Tour**, and an empty setlist. Add title and artist pairs when you know the running order. Reload the site after editing the file.
+The app ships with one concert, **LANY Soft World Tour**, labeled **Standard Asia Tour setlist**. Its running order is titles and artists in `concerts.json`, plus a link to the source setlist. Reload the site after editing the file.
 
-On the concert page, each slot says **Needs lyrics** until someone pastes a song with the same title and artist. Pasting uses the same Add song box, with the title and artist filled in, and then the slot links up. The page shows:
+On the concert page, each slot says **Needs lyrics** until someone pastes a song that matches that title and artist. Matching ignores case, punctuation, and a parenthetical tag, so `ILYSB` links to `ILYSB (Stripped)` and `Cause You Have To` links to `'Cause You Have To`. Extra words still count, so `Good` does not link to `Good Girls`. Pasting uses the same Add song box, with the setlist title and artist filled in. The page shows:
 
 - songs mastered out of the setlist length
 - your concert score, the sum of your best score on each linked song

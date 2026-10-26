@@ -1,5 +1,5 @@
 import { songStats } from "./progress.js";
-import { clip, safeConcertId, slug, songKey } from "./text.js";
+import { clip, normalizeAnswer, safeConcertId, slug, songKey, songsMatch } from "./text.js";
 
 export function normalizeConcerts(data) {
   const list = Array.isArray(data) ? data : data?.concerts;
@@ -9,6 +9,9 @@ export function normalizeConcerts(data) {
   for (const raw of list) {
     if (!raw || typeof raw.name !== "string" || !raw.name.trim()) continue;
     const name = clip(raw.name, 80);
+    const label = typeof raw.label === "string" ? clip(raw.label, 80) : "";
+    const sourceText = typeof raw.source === "string" ? raw.source.trim() : "";
+    const source = /^https:\/\/\S+$/.test(sourceText) ? clip(sourceText, 300) : "";
     let id = "";
     try {
       id = safeConcertId(raw.id || slug(name));
@@ -27,15 +30,29 @@ export function normalizeConcerts(data) {
         setlist.push({ title, artist });
       }
     }
-    concerts.push({ id, name, setlist });
+    concerts.push({ id, name, label, source, setlist });
   }
   return concerts;
+}
+
+export function bestSongMatch(songs, title, artist) {
+  let best = null;
+  let bestRank = 0;
+  for (const song of songs || []) {
+    if (!song || !songsMatch(song.title, song.artist, title, artist)) continue;
+    const rank = normalizeAnswer(song.title) === normalizeAnswer(title) ? 2 : 1;
+    if (rank > bestRank) {
+      best = song;
+      bestRank = rank;
+    }
+  }
+  return best;
 }
 
 export function linkSetlist(concert, songs, progress) {
   return (concert?.setlist || []).map((item, index) => {
     const key = songKey(item.title, item.artist);
-    const song = (songs || []).find((candidate) => songKey(candidate.title, candidate.artist) === key) || null;
+    const song = bestSongMatch(songs, item.title, item.artist);
     const stats = song ? songStats(progress || { songs: {} }, song) : null;
     const mastered = Boolean(stats && stats.lineCount > 0 && stats.linesMastered >= stats.lineCount);
     return {
@@ -69,8 +86,7 @@ export function concertSummary(slots) {
 }
 
 export function concertsForSong(concerts, title, artist) {
-  const key = songKey(title, artist);
-  return (concerts || []).filter((concert) => concert.setlist.some((item) => songKey(item.title, item.artist) === key));
+  return (concerts || []).filter((concert) => (concert.setlist || []).some((item) => songsMatch(item.title, item.artist, title, artist)));
 }
 
 export function leaderboardFromSongScores(songScores, setlist) {
@@ -79,21 +95,34 @@ export function leaderboardFromSongScores(songScores, setlist) {
     const playerName = clip(row.playerName, 40);
     if (!playerName) continue;
     const id = playerName.toLowerCase();
-    if (!players.has(id)) players.set(id, { playerName, slots: new Map() });
-    const player = players.get(id);
-    const key = songKey(row.songTitle, row.songArtist);
-    const score = Math.max(0, Math.round(Number(row.score) || 0));
-    player.slots.set(key, Math.max(player.slots.get(key) || 0, score));
+    if (!players.has(id)) players.set(id, { playerName, entries: [] });
+    players.get(id).entries.push({
+      title: clip(row.songTitle, 120),
+      artist: clip(row.songArtist, 120),
+      score: Math.max(0, Math.round(Number(row.score) || 0))
+    });
   }
+  const slots = setlist || [];
   const rows = [];
   for (const player of players.values()) {
-    let score = 0;
-    let played = 0;
-    for (const slot of setlist || []) {
-      const value = player.slots.get(songKey(slot.title, slot.artist)) || 0;
-      if (value > 0) played += 1;
-      score += value;
+    const bestBySlot = new Map();
+    for (const entry of player.entries) {
+      let chosen = -1;
+      let rank = 0;
+      slots.forEach((slot, index) => {
+        if (!songsMatch(entry.title, entry.artist, slot.title, slot.artist)) return;
+        const exact = normalizeAnswer(entry.title) === normalizeAnswer(slot.title) ? 2 : 1;
+        if (exact > rank) {
+          rank = exact;
+          chosen = index;
+        }
+      });
+      if (chosen < 0) continue;
+      bestBySlot.set(chosen, Math.max(bestBySlot.get(chosen) || 0, entry.score));
     }
+    let score = 0;
+    for (const value of bestBySlot.values()) score += value;
+    const played = bestBySlot.size;
     if (score > 0) rows.push({ playerName: player.playerName, score, played, total: (setlist || []).length });
   }
   rows.sort((a, b) => b.score - a.score || b.played - a.played || a.playerName.localeCompare(b.playerName));
