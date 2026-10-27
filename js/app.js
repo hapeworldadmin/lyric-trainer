@@ -1,6 +1,6 @@
-import { blip } from "./audio.js?v=7";
-import { readClipboardFromGesture } from "./clipboard.js?v=7";
-import { activeConcertSummary, concertStatusLine, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=7";
+import { blip } from "./audio.js?v=9";
+import { readClipboardFromGesture } from "./clipboard.js?v=9";
+import { activeConcertSummary, concertStatusLine, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=9";
 import {
   GAMES,
   answersMatch,
@@ -16,8 +16,8 @@ import {
   pointsFor,
   questionSeconds,
   sectionProgress
-} from "./games.js?v=7";
-import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=7";
+} from "./games.js?v=9";
+import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=9";
 import {
   addBonusXp,
   buildExport,
@@ -32,10 +32,10 @@ import {
   resetLineMasteryIfChanged,
   retitleSongProgress,
   songStats
-} from "./progress.js?v=7";
-import { SAMPLE_SONG } from "./sample.js?v=7";
-import { createScoreProvider, sanitizeRun } from "./scores.js?v=7";
-import { drawShareCard, shareText } from "./share.js?v=7";
+} from "./progress.js?v=9";
+import { SAMPLE_SONG } from "./sample.js?v=9";
+import { createScoreProvider, sanitizeRun } from "./scores.js?v=9";
+import { drawShareCard, shareText } from "./share.js?v=9";
 import {
   activePlayer,
   activeProgress as progressOf,
@@ -44,8 +44,8 @@ import {
   sampleRecord,
   saveState,
   seedSample
-} from "./storage.js?v=7";
-import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=7";
+} from "./storage.js?v=9";
+import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=9";
 
 const session = {
   state: null,
@@ -559,28 +559,30 @@ function viewPlay() {
     </div>
   ` : "";
   const around = contextHtml(question);
-  const check = !play.feedback && question.kind === "order" ? `
-    <div class="dock">
-      <button class="btn btn-primary" type="button" data-action="check" data-primary data-testid="check">Check <span class="key-hint">Enter</span></button>
-    </div>` : "";
+  const parts = play.feedback ? { tray: "", chips: "" } : answerParts(question);
+  const action = play.feedback ? continueControl(play) : (question.kind === "order" ? checkControl() : "");
+  const dock = `${play.feedback ? feedbackBody(play) : parts.chips}${action}`;
   return `
-    <section class="screen" data-testid="play">
-      <div class="play-top">
-        <button class="icon-btn" type="button" data-action="leave" data-testid="leave-lesson" aria-label="Close lesson">${icon("close")}</button>
-        <p class="play-crumb" data-testid="play-crumb">${escapeHtml(playCrumb(play, question))}</p>
-        <div class="play-meta">
-          <span class="score-pill" data-testid="score-pill">${formatScore(play.score)}</span>
-          <div class="hearts" data-testid="hearts" aria-label="${play.hearts} hearts left">${hearts}</div>
+    <section class="screen play-screen" data-testid="play">
+      <div class="play-scroll">
+        <div class="play-top">
+          <button class="icon-btn" type="button" data-action="leave" data-testid="leave-lesson" aria-label="Close lesson">${icon("close")}</button>
+          <p class="play-crumb" data-testid="play-crumb">${escapeHtml(playCrumb(play, question))}</p>
+          <div class="play-meta">
+            <span class="score-pill" data-testid="score-pill">${formatScore(play.score)}</span>
+            <div class="hearts" data-testid="hearts" aria-label="${play.hearts} hearts left">${hearts}</div>
+          </div>
         </div>
+        <div class="lesson-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${shown}" data-testid="lesson-progress">
+          <span style="width:${width}%"></span>
+        </div>
+        ${timer}
+        ${around.before}
+        ${questionHtml(question)}
+        ${around.after}
+        ${parts.tray}
       </div>
-      <div class="lesson-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${shown}" data-testid="lesson-progress">
-        <span style="width:${width}%"></span>
-      </div>
-      ${timer}
-      ${around.before}
-      ${questionHtml(question)}
-      ${around.after}
-      ${play.feedback ? feedbackHtml(play) : `${answerControls(question)}${check}`}
+      ${dock ? `<div class="answer-dock" data-testid="answer-dock">${dock}</div>` : ""}
     </section>
   `;
 }
@@ -601,7 +603,7 @@ function playCrumb(play, question) {
 function contextHtml(question) {
   const context = question?.context;
   if (!context) return { before: "", after: "" };
-  const showPrevious = context.previous && question.kind !== "next" && question.kind !== "sections" && !question.hidesPrevious;
+  const showPrevious = context.previous && question.kind !== "next" && !question.hidesPrevious;
   const previous = showPrevious ? `<p class="context-line is-anchor" data-testid="context-previous">${escapeHtml(context.previous)}</p>` : "";
   const allowNext = session.play?.gameId === "lines" && question.kind === "lines";
   const next = allowNext && context.next
@@ -635,7 +637,6 @@ function questionHtml(question) {
   }
   if (question.kind === "intruder") return `<p class="ask" data-testid="question">Which line does not belong?</p>`;
   if (question.kind === "swap") return `<p class="ask" data-testid="question">Tap the word that does not belong</p>`;
-  if (question.kind === "sections") return `<p class="ask" data-testid="question">Tap the opening lines in order</p>`;
   if (question.kind === "lines") return `<p class="ask" data-testid="question">Tap the lines in order</p>`;
   return `<p class="ask" data-testid="question">Tap the words in order</p>`;
 }
@@ -657,49 +658,61 @@ function keyHint(index) {
   return `<span class="key-hint">${index + 1}</span>`;
 }
 
-function answerControls(question) {
+function answerParts(question) {
   if (question.choices && question.kind !== "order") {
-    return `<div class="choices">${question.choices.map((choice, index) => `
-      <button class="choice" type="button" data-action="choose" data-option="${index}" data-choice="${index}">${keyHint(index)}${escapeHtml(choice)}</button>
-    `).join("")}</div>`;
+    return {
+      tray: "",
+      chips: `<div class="choices">${question.choices.map((choice, index) => `
+        <button class="choice" type="button" data-action="choose" data-option="${index}" data-choice="${index}">${keyHint(index)}${escapeHtml(choice)}</button>
+      `).join("")}</div>`
+    };
   }
   if (question.kind === "swap") {
-    return `<div class="pool">${question.words.map((word, index) => `
-      <button class="token" type="button" data-action="pick-swap" data-option="${index}" data-token="${escapeHtml(word.id)}">${keyHint(index)}${escapeHtml(word.text)}</button>
-    `).join("")}</div>`;
+    return {
+      tray: "",
+      chips: `<div class="pool">${question.words.map((word, index) => `
+        <button class="token" type="button" data-action="pick-swap" data-option="${index}" data-token="${escapeHtml(word.id)}">${keyHint(index)}${escapeHtml(word.text)}</button>
+      `).join("")}</div>`
+    };
   }
-  if (question.kind === "order" || question.kind === "lines" || question.kind === "sections") {
+  if (question.kind === "order" || question.kind === "lines") {
     const order = ensureOrder();
     const stacked = question.kind === "order" ? "" : " is-stacked";
     const byId = new Map(question.tokens.map((token) => [token.id, token]));
     const placed = order.arranged.map((id) => {
       const token = byId.get(id);
-      const tag = question.kind === "sections" && token?.label ? `<span class="token-tag">${escapeHtml(token.label)}</span>` : "";
-      return `<span class="token is-set${order.justPlaced === id ? " is-placed" : ""}">${escapeHtml(token?.text || "")}${tag}</span>`;
+      return `<span class="token is-set${order.justPlaced === id ? " is-placed" : ""}">${escapeHtml(token?.text || "")}</span>`;
     }).join("");
     const pool = order.pool.map((id, index) => `
       <button class="token" type="button" data-action="pick-token" data-option="${index}" data-token="${escapeHtml(id)}">${keyHint(index)}${escapeHtml(byId.get(id)?.text || "")}</button>
     `).join("");
-    const empty = question.kind === "sections" ? "The order appears here" : "Your line appears here";
-    return `
-      <div class="tray${stacked}" data-testid="tray">${placed || `<span class="hint">${empty}</span>`}</div>
-      <div class="pool${stacked}">${pool}</div>
-    `;
+    const empty = "Your line appears here";
+    return {
+      tray: `<div class="tray${stacked}" data-testid="tray">${placed || `<span class="hint">${empty}</span>`}</div>`,
+      chips: `<div class="pool${stacked}">${pool}</div>`
+    };
   }
-  return "";
+  return { tray: "", chips: "" };
 }
 
-function feedbackHtml(play) {
+function checkControl() {
+  return `<div class="dock"><button class="btn btn-primary" type="button" data-action="check" data-primary data-testid="check">Check <span class="key-hint">Enter</span></button></div>`;
+}
+
+function continueControl(play) {
+  const nextLabel = play.hearts <= 0 || play.index >= play.questions.length - 1 ? "See results" : "Continue";
+  return `<div class="dock"><button class="btn btn-primary" type="button" data-action="continue" data-primary data-testid="continue">${nextLabel} <span class="key-hint">Enter</span></button></div>`;
+}
+
+function feedbackBody(play) {
   const feedback = play.feedback;
   const praise = feedback.correct ? "Correct" : (feedback.timeout ? "Time is up" : "Not quite");
   const xp = feedback.xp ? ` +${feedback.xp} XP` : "";
-  const nextLabel = play.hearts <= 0 || play.index >= play.questions.length - 1 ? "See results" : "Continue";
   return `
     <div class="feedback ${feedback.correct ? "is-good" : "is-bad"}" role="status" data-testid="feedback">
       <p><strong>${praise}${xp}</strong></p>
       <p class="answer">${escapeHtml(feedback.answer)}</p>
     </div>
-    <div class="dock"><button class="btn btn-primary" type="button" data-action="continue" data-primary data-testid="continue">${nextLabel} <span class="key-hint">Enter</span></button></div>
   `;
 }
 
@@ -1317,7 +1330,7 @@ function submitCurrent(forced = null) {
     play.picked = forced?.choice ?? play.picked;
     if (!play.picked) return;
     correct = answersMatch(question.answer, play.picked);
-  } else if (question.kind === "order" || question.kind === "lines" || question.kind === "sections") {
+  } else if (question.kind === "order" || question.kind === "lines") {
     if (forced?.orderFailed) {
       correct = false;
     } else {

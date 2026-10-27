@@ -1,5 +1,5 @@
-import { songStats } from "./progress.js?v=7";
-import { clip, normalizeAnswer, safeConcertId, slug, songKey, songsMatch } from "./text.js?v=7";
+import { songStats } from "./progress.js?v=9";
+import { clip, normalizeAnswer, safeConcertId, slug, songKey, songsMatch } from "./text.js?v=9";
 
 export function normalizeConcerts(data) {
   const list = Array.isArray(data) ? data : data?.concerts;

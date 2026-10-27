@@ -1,8 +1,7 @@
-import { inferSections } from "./parse.js?v=7";
-import { contentKey, displayToken, mulberry32, normalizeAnswer, shuffle, tokenize, wordCount } from "./text.js?v=7";
+import { inferSections } from "./parse.js?v=9";
+import { contentKey, displayToken, mulberry32, normalizeAnswer, shuffle, tokenize, wordCount } from "./text.js?v=9";
 
 export const GAMES = [
-  { id: "sections", name: "Flow", detail: "Order each section's first line", group: "main" },
   { id: "lines", name: "Build", detail: "Line order in short rounds", group: "main" },
   { id: "next", name: "Next line", detail: "Recall what comes next", group: "main" },
   { id: "concert", name: "Final run", detail: "Timed run through the song", group: "main" },
@@ -12,7 +11,6 @@ export const GAMES = [
 ];
 
 export const CHAPTERS = [
-  { id: "sections", name: "Flow", detail: "Order each section's first line" },
   { id: "lines", name: "Build", detail: "Line order in short rounds" },
   { id: "next", name: "Next line", detail: "Recall what comes next" },
   { id: "concert", name: "Final run", detail: "Timed run through the song" }
@@ -38,7 +36,7 @@ export function secondsForLine(line) {
 
 export function questionSeconds(question) {
   if (!question) return 5;
-  if (question.kind === "lines" || question.kind === "sections" || question.kind === "order") {
+  if (question.kind === "lines" || question.kind === "order") {
     const text = question.kind === "order"
       ? (question.line || "")
       : (question.tokens || []).map((token) => token.text).join(" ");
@@ -88,14 +86,13 @@ export function gameAvailability(lines, sections = []) {
     next: list.length >= 3,
     letters: list.some((line) => tokenize(line).length >= 1),
     concert: list.length >= 1 && list.some((line) => tokenize(line).length >= 1),
-    sections: blocks.length >= 2,
     lines: blocks.some((block) => block.lines.length >= 2)
   };
 }
 
 export function firstLessonId(lines, sections = []) {
   const availability = gameAvailability(lines, sections);
-  for (const id of ["sections", "lines", "next", "fill", "letters", "order"]) {
+  for (const id of ["lines", "next", "fill", "letters", "order"]) {
     if (availability[id]) return id;
   }
   return "letters";
@@ -116,7 +113,7 @@ export function answersMatch(expected, given) {
 
 export function pointsFor({ kind, correct, combo, secondsLeft }) {
   if (!correct) return { xp: 0, score: 0 };
-  const base = { fill: 10, next: 10, order: 12, letters: 15, lines: 14, sections: 16, previous: 10, swap: 12, intruder: 12, which: 10, truth: 10 }[kind] || 10;
+  const base = { fill: 10, next: 10, order: 12, letters: 15, lines: 14, previous: 10, swap: 12, intruder: 12, which: 10, truth: 10 }[kind] || 10;
   const xp = base + Math.min(10, Math.max(0, combo - 1) * 2);
   let score = 100 + combo * 10;
   if (typeof secondsLeft === "number") score += Math.max(0, Math.round(secondsLeft * 8));
@@ -151,7 +148,7 @@ export function exposedText(question) {
 
 export function correctLine(question) {
   if (!question) return "";
-  if (question.kind === "lines" || question.kind === "sections") {
+  if (question.kind === "lines") {
     return (question.tokens || []).map((token) => token.text).join("\n");
   }
   return question.line || question.answer || "";
@@ -163,7 +160,7 @@ export function gradeAnswer(question, given) {
     const word = (question.words || []).find((item) => item.id === given);
     return Boolean(word?.wrong);
   }
-  if (question.kind === "order" || question.kind === "lines" || question.kind === "sections") {
+  if (question.kind === "order" || question.kind === "lines") {
     return isOrderCorrect(question, given);
   }
   return answersMatch(question.answer, given);
@@ -183,33 +180,6 @@ function shuffleTokens(tokens, rng) {
     shuffled = [...shuffled.slice(1), shuffled[0]];
   }
   return shuffled;
-}
-
-function blockContext(lines, block, rangeLabel) {
-  return {
-    section: block?.label || "",
-    position: block ? block.start + 1 : 1,
-    total: lines.length,
-    previous: "",
-    next: "",
-    rangeLabel
-  };
-}
-
-function roundSizes(total, max) {
-  if (total <= max) return [total];
-  const sizes = [];
-  let left = total;
-  while (left > 0) {
-    if (left <= max) {
-      sizes.push(left);
-      break;
-    }
-    const take = left - max === 1 ? max - 1 : max;
-    sizes.push(take);
-    left -= take;
-  }
-  return sizes;
 }
 
 export function lineWindowSizes(total) {
@@ -240,42 +210,6 @@ function stampRounds(questions) {
     seen.set(base, count);
     return { ...question, roundId: count === 1 ? base : `${base}-${count}` };
   });
-}
-
-function makeSectionOrder(lines, blocks, rng, rangeLabel) {
-  if (blocks.length < 2) return null;
-  const tokens = blocks.map((block) => ({
-    id: block.id,
-    text: block.lines[0] || block.label,
-    label: block.label
-  }));
-  return {
-    kind: "sections",
-    lineIndex: blocks[0].start,
-    line: blocks[0].lines[0] || "",
-    tokens,
-    shuffled: shuffleTokens(tokens, rng),
-    roundLines: tokens.map((token) => token.text),
-    context: blockContext(lines, null, rangeLabel)
-  };
-}
-
-function sectionQuestions(lines, sections, rng) {
-  const blocks = sectionBlocks(lines, sections);
-  if (blocks.length < 2) return [];
-  const sizes = roundSizes(blocks.length, 6);
-  const questions = [];
-  let offset = 0;
-  for (const size of sizes) {
-    const slice = blocks.slice(offset, offset + size);
-    const rangeLabel = sizes.length === 1
-      ? `${blocks.length} sections`
-      : `sections ${offset + 1}–${offset + size} of ${blocks.length}`;
-    const question = makeSectionOrder(lines, slice, rng, rangeLabel);
-    if (question) questions.push(question);
-    offset += size;
-  }
-  return questions;
 }
 
 function makeLineWindow(lines, block, start, end, rng) {
@@ -406,12 +340,6 @@ function varied(lines, sections, rng, weights, count) {
   return made;
 }
 
-const FLOW_WEIGHTS = [
-  { type: "which", weight: 3 },
-  { type: "intruder", weight: 2 },
-  { type: "truth", weight: 2 },
-  { type: "next", weight: 1 }
-];
 const BUILD_WEIGHTS = [
   { type: "fill", weight: 2 },
   { type: "swap", weight: 2 },
@@ -426,12 +354,6 @@ const NEXT_WEIGHTS = [
   { type: "truth", weight: 2 },
   { type: "which", weight: 1 }
 ];
-
-function flowLesson(lines, sections, rng) {
-  const backbone = sectionQuestions(lines, sections, rng).map((question) => withContext(question, lines, sections));
-  const fillers = varied(lines, sections, rng, FLOW_WEIGHTS, Math.max(1, Math.floor(backbone.length / 2)));
-  return interleave(backbone, fillers);
-}
 
 function lineLesson(lines, sections, rng, chunk) {
   let backbone = lineQuestions(lines, sections, rng);
@@ -512,7 +434,6 @@ function keepRounds(questions, options) {
 export function buildLesson(lines, gameId, rng = Math.random, sections = [], options = {}) {
   const list = [...(lines || [])];
   const labels = sections || [];
-  if (gameId === "sections") return keepRounds(flowLesson(list, labels, rng), options);
   if (gameId === "lines") return keepRounds(lineLesson(list, labels, rng, Number.isInteger(options.chunk) ? options.chunk : null), options);
   if (gameId === "next") return keepRounds(nextLesson(list, labels, rng), options);
   if (gameId === "concert") return finalRun(list, labels, rng);
@@ -541,23 +462,16 @@ function unfinished(questions, rounds) {
 }
 
 export function nextPractice(lines, sections = [], { rounds = {}, chapters = {} } = {}) {
-  const flow = flowLesson(lines, sections, () => 0.5);
   const build = lineLesson(lines, sections, () => 0.5, null);
   const recall = nextLesson(lines, sections, () => 0.5);
-  const flowDone = !unfinished(flow, rounds);
   const buildDone = !unfinished(build, rounds);
   const recallDone = !unfinished(recall, rounds);
   const plan = chapterPlan(lines, sections, {
     ...chapters,
-    sections: chapters.sections || flowDone,
     lines: chapters.lines || buildDone,
     next: chapters.next || recallDone
   });
   const playable = (id) => plan.find((chapter) => chapter.id === id)?.status === "open";
-  if (playable("sections")) {
-    const question = unfinished(flow, rounds);
-    if (question) return { gameId: "sections", roundId: question.roundId };
-  }
   if (playable("lines")) {
     const question = unfinished(build, rounds);
     if (question) return { gameId: "lines", roundId: question.roundId };
