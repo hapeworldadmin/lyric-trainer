@@ -245,12 +245,26 @@ export const FADE_PASSES = ["full", "some", "mostly", "none"];
 const FADE_PASS_LABELS = {
   full: "All words",
   some: "Some words hidden",
-  mostly: "Most words hidden",
+  mostly: "Hardest pass",
   none: "All words hidden"
 };
 
 export function fadePassLabel(pass) {
   return FADE_PASS_LABELS[pass] || FADE_PASS_LABELS.full;
+}
+
+export function fadeLessonFraction(question, state = {}) {
+  const steps = question?.steps || [];
+  const count = Math.max(1, steps.length);
+  const passes = FADE_PASSES.length;
+  if (state?.finished) return 1;
+  const pass = Math.max(0, Math.min(passes - 1, state?.pass || 0));
+  const line = Math.max(0, Math.min(count - 1, state?.line || 0));
+  const text = steps[line]?.text || "";
+  const hidden = hiddenWordIndexes(tokenize(text).length, FADE_PASSES[pass]).length;
+  const revealed = Math.max(0, state?.revealed || 0);
+  const linePart = hidden ? Math.min(1, revealed / hidden) : 0;
+  return (pass * count + line + linePart) / (passes * count);
 }
 
 export function hiddenWordIndexes(count, pass) {
@@ -349,8 +363,8 @@ export function studyFrame(question, state = {}) {
       line,
       lineCount: steps.length,
       done: view.done,
-      action: view.done ? "Next" : "Reveal",
-      prompt: view.done ? "Read this line" : "Tap to reveal",
+      action: view.done ? "Next" : "Reveal next word",
+      prompt: view.done ? "Read this line" : "Say the missing words",
       future: steps.slice(line + 1).map((item) => item.text)
     };
   }
@@ -359,12 +373,20 @@ export function studyFrame(question, state = {}) {
     const current = queue[0];
     if (!current) return null;
     const phase = state.phase === "rate" ? "rate" : "think";
+    const steps = question.steps || [];
+    const stepIndex = Math.max(0, steps.findIndex((step) => step.id === current.id));
+    const section = String(question.context?.section || "").trim();
+    const count = Math.max(steps.length, 1);
+    const place = section
+      ? `${section} · line ${stepIndex + 1} of ${count}`
+      : `line ${stepIndex + 1} of ${count}`;
     return {
       kind: "think",
       previous: current.previous || "",
       target: phase === "rate" ? current.text : "",
       words: [],
       phase,
+      place,
       prompt: phase === "rate"
         ? "Did you have it?"
         : (current.previous ? "Recall the next line" : "Recall this line"),

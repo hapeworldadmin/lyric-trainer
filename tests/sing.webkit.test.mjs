@@ -184,7 +184,7 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
       assert.equal(hierarchy.inputSize, "17px");
       assert.equal(hierarchy.inputWeight, 600);
       assert.equal(hierarchy.inputBorder, "1px");
-      assert.equal(hierarchy.inputBorderColor, "rgb(74, 74, 90)");
+      assert.equal(hierarchy.inputBorderColor, "rgb(92, 92, 112)");
       assert.notEqual(hierarchy.ghostBg, hierarchy.checkBg);
       assert.equal(hierarchy.ghostColor, "rgb(161, 161, 170)");
       const hint = await page.locator(".btn-primary .key-hint").evaluate((el) => getComputedStyle(el).display);
@@ -195,24 +195,47 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
         const dock = document.querySelector("[data-testid=answer-dock]").getBoundingClientRect();
         const check = document.querySelector("[data-testid=check]").getBoundingClientRect();
         const input = document.querySelector("[data-testid=sing-input]").getBoundingClientRect();
+        const status = document.querySelector("[data-testid=sing-miss]");
+        const slot = document.querySelector("[data-testid=listen-slot]");
         return {
+          previousTop: previous.top,
           previousBottom: previous.bottom,
           dockTop: dock.top,
           checkBottom: check.bottom,
           inputRight: input.right,
           vh: window.innerHeight,
-          vw: window.innerWidth
+          vw: window.innerWidth,
+          statusRole: status?.getAttribute("role") || "",
+          slotHeight: slot ? slot.getBoundingClientRect().height : 0,
+          hearts: document.querySelector("[data-testid=hearts]")?.getAttribute("aria-label") || "",
+          score: document.querySelector("[data-testid=score-pill]")?.getAttribute("aria-label") || ""
         };
       });
+      assert.ok(idleBox.previousTop < idleBox.vh * 0.4, `lyric sits high on ${viewport.name}, top ${idleBox.previousTop}`);
       assert.ok(idleBox.previousBottom <= idleBox.dockTop + 1, `context overlaps the dock on ${viewport.name}`);
+      assert.equal(idleBox.statusRole, "status");
+      assert.ok(idleBox.slotHeight >= 52, `listen slot ${idleBox.slotHeight}`);
+      assert.equal(idleBox.hearts, "5 of 5 lives");
+      assert.match(idleBox.score, /^Score /);
       assert.ok(idleBox.vh - idleBox.checkBottom >= 12 && idleBox.vh - idleBox.checkBottom <= 24, `check bottom ${idleBox.checkBottom} on ${viewport.name}`);
       assert.ok(idleBox.inputRight <= idleBox.vw - 8);
       await page.screenshot({ path: path.join(shots, `sing_idle_${viewport.name}.png`) });
 
       await page.evaluate((text) => { window.__heard = text; }, heard);
+      const lyricTop = idleBox.previousTop;
       await page.getByTestId("mic").click();
       await page.getByTestId("live-transcript").waitFor();
       assert.equal(await page.getByTestId("live-transcript").innerText(), heard);
+      const heardStyle = await page.getByTestId("live-transcript").evaluate((el) => {
+        const style = getComputedStyle(el);
+        return { size: style.fontSize, weight: style.fontWeight, fontStyle: style.fontStyle, color: style.color };
+      });
+      assert.equal(heardStyle.size, "20px");
+      assert.equal(heardStyle.weight, "600");
+      assert.equal(heardStyle.fontStyle, "italic");
+      assert.equal(heardStyle.color, "rgb(201, 201, 209)");
+      const lyricWhileListening = await page.getByTestId("context-previous").evaluate((el) => el.getBoundingClientRect().top);
+      assert.ok(Math.abs(lyricWhileListening - lyricTop) < 2, `lyric moved while listening on ${viewport.name}`);
       assert.equal(await page.getByTestId("sing-input").inputValue(), "");
       assert.match(await page.getByTestId("listen-status").innerText(), /Listening/i);
       const listening = await page.evaluate(() => ({
@@ -370,14 +393,16 @@ test("webkit screenshots keep lyrics and controls distinct on iPhone and Mac", a
       const gap = await page.evaluate(() => {
         const lyric = document.querySelector("[data-testid=context-previous]").getBoundingClientRect();
         const dock = document.querySelector("[data-testid=answer-dock]").getBoundingClientRect();
-        return dock.top - lyric.bottom;
+        return { space: dock.top - lyric.bottom, top: lyric.top, vh: window.innerHeight };
       });
-      assert.ok(gap >= 8 && gap < 180, `lyric to controls gap ${gap} on ${viewport.name}`);
+      assert.ok(gap.space >= 8, `lyric overlaps controls on ${viewport.name}`);
+      assert.ok(gap.top < gap.vh * 0.4, `lyric sits high on ${viewport.name}, top ${gap.top}`);
       await page.screenshot({ path: path.join(shots, `sing-idle-${viewport.name}.png`) });
 
       await page.getByTestId("sing-input").fill("nope nope nope nope");
       await page.getByTestId("check").click();
-      await page.getByTestId("sing-miss").waitFor();
+      await page.waitForFunction(() => document.getElementById("sing-field")?.className.includes("is-wrong"));
+      assert.equal(await page.getByTestId("sing-miss").getAttribute("role"), "status");
       await page.getByTestId("sing-input").fill("still nope nope nope");
       await page.getByTestId("check").click();
       await page.getByTestId("show-answer").waitFor();
