@@ -21,9 +21,11 @@ The only song included with the app is an original placeholder, **Banana Flashli
 
 The main path follows the song:
 
-- **Line order** — put a few lines back in order (about four or five at a time). The line above the group stays visible as a dimmed anchor.
+- **Fade** — read a short round with the previous line above it. Each pass hides more words (all, some, most, then none). Tap to reveal the next word.
+- **Think** — the previous line stays up. Recall the next line, tap Show, then mark Got it or Missed it. A miss comes back later in the round.
+- **Line order** — put a few lines back in order (about four to six at a time). The line above the group stays visible as a dimmed anchor.
 - **Next line** — choose the line that comes next.
-- **Final run** — a timed pass through the whole song.
+- **Final run** — a timed pass through the whole song. Mastered rounds are skipped until this run.
 
 **Tricky lines** is a short warm-up: fill the blank, word order, and first letters.
 

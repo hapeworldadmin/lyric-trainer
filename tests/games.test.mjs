@@ -34,7 +34,9 @@ test("every game can be built from the sample song", () => {
   assert.equal(availability.letters, true);
   assert.equal(availability.concert, true);
   assert.equal(availability.lines, true);
-  assert.equal(firstLessonId(SAMPLE_SONG.lines, SAMPLE_SONG.sections), "lines");
+  assert.equal(firstLessonId(SAMPLE_SONG.lines, SAMPLE_SONG.sections), "fade");
+  assert.equal(availability.fade, true);
+  assert.equal(availability.think, true);
   assert.equal(Object.hasOwn(availability, "sections"), false);
   for (const gameId of ["fill", "order", "letters"]) {
     const lesson = buildLesson(SAMPLE_SONG.lines, gameId, seededRng(7));
@@ -163,7 +165,7 @@ test("line order slides in short windows", () => {
 
   const longSection = buildLesson(lines, "lines", seededRng(2), lines.map(() => "Chorus")).filter((question) => question.kind === "lines");
   assert.ok(longSection.every((question) => question.tokens.length <= 6));
-  assert.equal(longSection[0].tokens.length, 5);
+  assert.equal(longSection[0].tokens.length, 6);
   assert.equal(longSection.reduce((sum, question) => sum + question.tokens.length, 0), 33);
 });
 
@@ -265,7 +267,9 @@ test("question types do not repeat more than twice in a row", () => {
 test("line rounds stay at least three lines and a seven line stanza is four then three", () => {
   assert.deepEqual(lineWindowSizes(7), [4, 3]);
   assert.deepEqual(lineWindowSizes(2), [2]);
+  assert.deepEqual(lineWindowSizes(6), [6]);
   assert.deepEqual(lineWindowSizes(10), [5, 5]);
+  assert.deepEqual(lineWindowSizes(12), [6, 6]);
   const seven = Array.from({ length: 7 }, (_, index) => `lantern line number ${index} here`);
   const lesson = buildLesson(seven, "lines", seededRng(1), seven.map(() => "Verse")).filter((question) => question.kind === "lines");
   assert.deepEqual(lesson.map((question) => question.tokens.length), [4, 3]);
@@ -287,21 +291,23 @@ test("mastered rounds are skipped and the final run still covers them", () => {
   assert.equal(cursor, lines.length);
   const rounds = { [full[0].roundId]: { mastered: true } };
   const step = nextPractice(lines, sections, { rounds, chapters: { sections: true } });
-  assert.equal(step.gameId, "lines");
+  assert.equal(step.gameId, "fade");
   assert.notEqual(step.roundId, full[0].roundId);
   const progress = sectionProgress(lines, sections, rounds);
   assert.equal(progress[0].mastered, full[0].tokens.length);
   const plan = chapterPlan(lines, sections, {});
-  assert.deepEqual(plan.map((chapter) => chapter.id), ["lines", "next", "concert"]);
-  assert.equal(plan[0].name, "Build");
+  assert.deepEqual(plan.map((chapter) => chapter.id), ["fade", "think", "lines", "next", "concert"]);
+  assert.equal(plan[0].name, "Fade");
   assert.equal(plan[0].status, "open");
   assert.equal(plan[1].status, "locked");
-  assert.equal(plan[2].status, "locked");
-  assert.equal(chapterPlan(lines, sections, { lines: true })[1].status, "open");
+  assert.equal(plan[4].id, "concert");
+  assert.equal(plan[4].status, "locked");
+  assert.equal(chapterPlan(lines, sections, { fade: true })[1].status, "open");
+  assert.equal(chapterPlan(lines, sections, { fade: true })[1].id, "think");
   assert.equal(chapterPlan(lines, sections, { sections: true })[0].status, "open");
-  assert.equal(chapterPlan(lines, sections, { sections: true })[0].id, "lines");
+  assert.equal(chapterPlan(lines, sections, { sections: true })[0].id, "fade");
   const fresh = nextPractice(lines, sections, {});
-  assert.equal(fresh.gameId, "lines");
+  assert.equal(fresh.gameId, "fade");
   assert.ok(fresh.roundId);
   for (const gameId of ["lines", "next", "concert"]) {
     const lesson = buildLesson(lines, gameId, seededRng(5), sections);
@@ -311,7 +317,7 @@ test("mastered rounds are skipped and the final run still covers them", () => {
   const singles = ["alpha one two", "beta three four", "gamma five six"];
   const singleLabels = ["Verse", "Chorus", "Bridge"];
   assert.equal(gameAvailability(singles, singleLabels).lines, false);
-  assert.equal(firstLessonId(singles, singleLabels), "next");
+  assert.equal(firstLessonId(singles, singleLabels), "fade");
   assert.ok(buildLesson(singles, "next", seededRng(1), singleLabels).length > 0);
   const covered = buildLesson(singles, "concert", seededRng(1), singleLabels);
   assert.equal(covered.some((question) => question.kind === "sections"), false);
@@ -372,7 +378,7 @@ test("about one in three next-line questions can be sung, and the final run has 
   const forced = buildLesson(SAMPLE_SONG.lines, "next", seededRng(4), SAMPLE_SONG.sections, { forceSing: true });
   assert.equal(forced[0].sing, true);
   assert.equal(forced.filter((question) => question.sing).length, sampleSing.length);
-  for (const gameId of ["lines", "fill", "order", "letters"]) {
+  for (const gameId of ["lines", "fill", "order", "letters", "fade", "think"]) {
     const lesson = buildLesson(SAMPLE_SONG.lines, gameId, seededRng(4), SAMPLE_SONG.sections);
     assert.equal(lesson.some((question) => question.sing), false);
   }

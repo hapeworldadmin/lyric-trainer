@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
 import test from "node:test";
+import { SAMPLE_SONG } from "../js/sample.js";
 
 const root = path.resolve(import.meta.dirname, "..");
 const port = 5198;
@@ -292,7 +293,7 @@ test("webkit word order accepts number keys and Enter, and ignores keys in a fie
   }
 });
 
-test("webkit first lesson is line order, not section order, on iPhone and Mac", async (t) => {
+test("webkit first chapter is fade, and line order is still not section order, on iPhone and Mac", async (t) => {
   if (!webkit) {
     t.skip("playwright is not installed");
     return;
@@ -341,15 +342,17 @@ test("webkit first lesson is line order, not section order, on iPhone and Mac", 
       const page = await context.newPage();
       const base = `http://127.0.0.1:${flowPort}`;
       await page.goto(`${base}/#/song/sample-banana-flashlight`, { waitUntil: "domcontentloaded" });
-      await page.getByTestId("game-lines").waitFor();
+      await page.getByTestId("game-fade").waitFor();
       const songText = await page.locator("body").innerText();
       assert.equal(songText.includes("Flow"), false);
       assert.equal(songText.includes("Tap the opening lines"), false);
-      assert.match(await page.getByTestId("chapter-progress").innerText(), /0 of 3 chapters/);
+      assert.match(await page.getByTestId("chapter-progress").innerText(), /0 of 5 chapters/);
+      assert.match(await page.getByTestId("game-fade").innerText(), /Fade/);
       assert.match(await page.getByTestId("game-lines").innerText(), /Build/);
+      assert.equal(await page.getByTestId("game-lines").isDisabled(), true);
       assert.equal(await page.getByTestId("game-sections").count(), 0);
 
-      await page.getByTestId("game-lines").click();
+      await page.goto(`${base}/#/play/sample-banana-flashlight/lines`, { waitUntil: "domcontentloaded" });
       await page.getByTestId("play").waitFor();
       const ask = await page.getByTestId("question").innerText();
       assert.match(ask, /tap the lines in order/i);
@@ -361,6 +364,50 @@ test("webkit first lesson is line order, not section order, on iPhone and Mac", 
         return el.className;
       });
       assert.match(tapped, /is-accept|is-reject/);
+
+      await page.goto(`${base}/#/play/sample-banana-flashlight/fade`, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("fade-advance").waitFor();
+      assert.equal(await page.locator(".btn-primary").count(), 1);
+      const fadeBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+      const fadeBtn = await page.locator(".btn-primary").evaluate((el) => getComputedStyle(el).backgroundColor);
+      assert.equal(fadeBg, "rgb(11, 11, 15)");
+      assert.equal(fadeBtn, "rgb(139, 111, 255)");
+      let fadeText = await page.locator("body").innerText();
+      assert.equal(fadeText.includes(SAMPLE_SONG.lines[1]), false);
+      assert.equal(fadeText.includes(SAMPLE_SONG.lines[0]), true);
+      await page.keyboard.press("Enter");
+      await page.getByTestId("fade-line").waitFor();
+      fadeText = await page.locator("body").innerText();
+      assert.equal(fadeText.includes(SAMPLE_SONG.lines[1]), true);
+      assert.equal(fadeText.includes(SAMPLE_SONG.lines[2]), false);
+      let hops = 0;
+      while (hops < 12 && !(await page.getByTestId("fade-pass").innerText()).includes("Some words hidden")) {
+        await page.keyboard.press("Enter");
+        hops += 1;
+      }
+      assert.match(await page.getByTestId("fade-pass").innerText(), /Some words hidden/);
+      const hiddenBefore = await page.getByTestId("fade-blank").count();
+      assert.ok(hiddenBefore > 0);
+      await page.keyboard.press("1");
+      assert.ok(await page.getByTestId("fade-blank").count() < hiddenBefore);
+
+      await page.goto(`${base}/#/play/sample-banana-flashlight/think`, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("think-show").waitFor();
+      assert.equal(await page.locator(".btn-primary").count(), 1);
+      assert.equal((await page.locator("body").innerText()).includes(SAMPLE_SONG.lines[0]), false);
+      await page.keyboard.press("Enter");
+      await page.getByTestId("think-got").waitFor();
+      let thinkText = await page.locator("body").innerText();
+      assert.equal(thinkText.includes(SAMPLE_SONG.lines[0]), true);
+      assert.equal(thinkText.includes(SAMPLE_SONG.lines[1]), false);
+      assert.equal(await page.locator(".btn-primary").count(), 1);
+      await page.keyboard.press("2");
+      await page.getByTestId("think-show").waitFor();
+      thinkText = await page.locator("body").innerText();
+      assert.match(await page.getByTestId("question").innerText(), /recall the next line/i);
+      assert.equal(thinkText.includes(SAMPLE_SONG.lines[0]), true);
+      assert.equal(thinkText.includes(SAMPLE_SONG.lines[1]), false);
+      assert.equal(thinkText.includes(SAMPLE_SONG.lines[2]), false);
 
       await page.goto(`${base}/#/play/sample-banana-flashlight/concert`, { waitUntil: "domcontentloaded" });
       await page.getByTestId("play").waitFor();

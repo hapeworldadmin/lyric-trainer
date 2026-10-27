@@ -481,6 +481,12 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
   font-weight: 700;
   line-height: 1.35;
 }
+.lyric-block.is-context { border-left-color: #3a3a46; }
+.lyric-block.is-context .lyric-line {
+  color: var(--muted);
+  font-size: 17px;
+  font-weight: 600;
+}
 .lyric-block .target-line,
 .lyric-block .lyric-line { margin: 0; }
 .target-line { margin: 16px 0; }

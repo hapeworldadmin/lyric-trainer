@@ -1,6 +1,6 @@
 import { SAMPLE_SONG } from "./sample.js?v=9";
-import { emptyProgress } from "./progress.js?v=9";
-import { sanitizeRun } from "./scores.js?v=9";
+import { emptyProgress } from "./progress.js?v=10";
+import { sanitizeRun } from "./scores.js?v=10";
 import { clip, songKey, uid } from "./text.js?v=9";
 
 export const STORAGE_KEY = "lyric-trainer-v1";
@@ -163,7 +163,7 @@ function cleanSongProgress(row) {
   }
   const bestByGame = {};
   for (const [game, value] of Object.entries(row.bestByGame || {})) {
-    if (!["fill", "order", "next", "letters", "concert", "lines"].includes(game)) continue;
+    if (!["fill", "order", "next", "letters", "concert", "lines", "fade", "think"].includes(game)) continue;
     bestByGame[game] = Math.max(0, Math.round(Number(value) || 0));
   }
   const rounds = {};
@@ -177,7 +177,7 @@ function cleanSongProgress(row) {
     };
   }
   const chapters = {};
-  for (const id of ["lines", "next", "concert"]) {
+  for (const id of ["fade", "think", "lines", "next", "concert"]) {
     if (row.chapters?.[id]) chapters[id] = true;
   }
   let imported = null;
