@@ -33,7 +33,7 @@
   --display: "Inter Tight", Inter, ui-sans-serif, system-ui, sans-serif;
   color-scheme: dark;
 }
-.accent-violet { --accent: #8b6fff; --hero-from: #3d3180; --glow: #8b6fff73; }
+.accent-violet { --accent: #8b6fff; --hero-start: #6E4FF0; --hero-from: #3d3180; --glow: #8b6fff73; }
 .accent-coral { --accent: #ff4d6d; --hero-from: #5e212f; --glow: #ff4d6d73; }
 .accent-cyan { --accent: #22d3ee; --hero-from: #113d47; --glow: #22d3ee73; }
 
@@ -165,14 +165,14 @@ h2 {
 
 .hero {
   display: grid;
-  background: linear-gradient(160deg, var(--accent) 0%, var(--hero-mid, var(--hero-from)) 55%, #16161d 100%);
+  background: linear-gradient(160deg, var(--hero-start, var(--accent)) 0%, var(--hero-mid, var(--hero-from)) 55%, #16161d 100%);
   color: var(--ink);
   border-radius: 16px;
   padding: 24px;
   margin: 8px 0 16px;
 }
 .hero-song {
-  background: linear-gradient(160deg, var(--accent, #7c5cff) 0%, var(--hero-mid, #3a2d86) 55%, #16161d 100%);
+  background: linear-gradient(160deg, var(--hero-start, var(--accent, #7c5cff)) 0%, var(--hero-mid, #3a2d86) 55%, #16161d 100%);
 }
 .hero h1 { color: var(--ink); overflow-wrap: anywhere; }
 .hero-stat {
@@ -373,6 +373,7 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
   border-radius: 999px;
   background: #1f1f28;
 }
+.lesson-bar { margin-bottom: 16px; }
 .meter::before, .lesson-bar::before {
   content: "";
   position: absolute;
@@ -529,8 +530,8 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
   text-align: left;
 }
 .choice, .token {
-  background: #1f1f28;
-  border: 1px solid #2a2a35;
+  background: #262632;
+  border: 1px solid #4A4A5A;
   border-radius: 8px;
   color: var(--ink);
   font-size: 17px;
@@ -550,6 +551,11 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
   animation: token-shake 300ms linear;
 }
 .token.is-set { background: transparent; color: #fff; border-color: transparent; }
+.tray .token.is-set {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.35;
+}
 .token.is-placed { animation: token-arrive 300ms ease; }
 .tray {
   min-height: 56px;
@@ -577,8 +583,68 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
 .feedback.is-good strong { color: var(--good); }
 .feedback.is-bad strong { color: var(--bad); }
 .feedback p { margin: 8px 0; }
-.feedback .answer { font-size: 16px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; white-space: pre-wrap; }
+.feedback .answer {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 .dock { margin-top: 16px; display: grid; gap: 8px; }
+
+.app.is-play {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.app.is-play main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-top: calc(8px + env(safe-area-inset-top));
+  padding-right: max(16px, env(safe-area-inset-right));
+  padding-bottom: 0;
+  padding-left: max(16px, env(safe-area-inset-left));
+}
+.play-screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.play-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.answer-dock {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  max-height: 70dvh;
+  padding-top: 8px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  background: var(--canvas);
+}
+.answer-dock .choices,
+.answer-dock .pool {
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 16px;
+}
+.answer-dock .dock { margin-top: 0; }
+.answer-dock .feedback {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
 
 .filters { display: flex; gap: 8px; overflow-x: auto; margin: 8px 0 16px; }
 .filters button {

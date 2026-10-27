@@ -8,6 +8,41 @@ const root = path.resolve(import.meta.dirname, "..");
 const port = 5198;
 const lyricPaste = "[Verse]\nalpha one two\nbeta three four\n\n[Chorus]\ngamma five six";
 
+function lessonDockMetrics() {
+  const bar = document.querySelector(".lesson-bar");
+  const next = bar?.nextElementSibling;
+  const check = document.querySelector("[data-testid=check], [data-testid=continue]");
+  const chips = document.querySelector(".answer-dock .pool, .answer-dock .choices");
+  const line = document.querySelector(".target-line");
+  const scroll = document.querySelector(".play-scroll");
+  const dock = document.querySelector(".answer-dock");
+  const rule = [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules].map((item) => item.cssText)).join("\n");
+  const box = (el) => {
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom, height: rect.height, left: rect.left, right: rect.right };
+  };
+  const scrollBox = box(scroll);
+  const chipBox = box(chips);
+  const checkBox = box(check);
+  const lineBox = box(line);
+  return {
+    gap: bar && next ? next.getBoundingClientRect().top - bar.getBoundingClientRect().bottom : null,
+    line: lineBox,
+    chips: chipBox,
+    check: checkBox,
+    scroll: scrollBox,
+    checkPadding: dock ? getComputedStyle(dock).paddingBottom : "",
+    safeArea: /\.answer-dock\{[^}]*env\(safe-area-inset-bottom\)/.test(rule.replace(/\s+/g, ""))
+      && /env\(safe-area-inset-top\)/.test(rule)
+      && /env\(safe-area-inset-left\)/.test(rule)
+      && /env\(safe-area-inset-right\)/.test(rule),
+    overlaps: Boolean(scrollBox && chipBox && scrollBox.bottom > chipBox.top + 1),
+    vh: window.innerHeight,
+    vw: window.innerWidth
+  };
+}
+
 let webkit = null;
 try {
   ({ webkit } = await import("playwright"));
@@ -204,8 +239,8 @@ test("webkit word order accepts number keys and Enter, and ignores keys in a fie
     assert.equal(look.line.size, "22px");
     assert.equal(look.line.weight, "700");
     assert.equal(look.blank.color, "rgb(139, 111, 255)");
-    assert.equal(look.token.bg, "rgb(31, 31, 40)");
-    assert.equal(look.token.border, "rgb(42, 42, 53)");
+    assert.equal(look.token.bg, "rgb(38, 38, 50)");
+    assert.equal(look.token.border, "rgb(74, 74, 90)");
     assert.equal(look.token.size, "17px");
     assert.equal(look.token.weight, "600");
     assert.equal(look.token.minHeight, "48px");
@@ -220,6 +255,15 @@ test("webkit word order accepts number keys and Enter, and ignores keys in a fie
     assert.equal(look.heart.color, "rgb(255, 77, 109)");
     assert.ok(look.hint.display === "inline-flex" || look.hint.display === "flex");
     assert.equal(look.check.bg, "rgb(139, 111, 255)");
+    const dock = await page.evaluate(lessonDockMetrics);
+    assert.ok(dock.gap >= 16, `progress gap ${dock.gap}`);
+    assert.ok(dock.line.bottom <= dock.scroll.bottom + 1);
+    assert.ok(dock.scroll.bottom <= dock.chips.top + 1);
+    assert.ok(dock.chips.bottom <= dock.check.top + 1);
+    assert.ok(dock.vh - dock.check.bottom >= 12 && dock.vh - dock.check.bottom <= 24, `check bottom gap ${dock.vh - dock.check.bottom}`);
+    assert.equal(dock.checkPadding, "16px");
+    assert.equal(dock.safeArea, true);
+    assert.equal(dock.overlaps, false);
     await page.evaluate(() => {
       const badge = document.createElement("div");
       badge.id = "netlify-drawer";
@@ -242,6 +286,132 @@ test("webkit word order accepts number keys and Enter, and ignores keys in a fie
     assert.equal(await name.inputValue(), "1");
     assert.match(page.url(), /#\/me/);
     await context.close();
+  } finally {
+    server.kill();
+    await browser.close();
+  }
+});
+
+test("webkit lesson dock, hero contrast, and answer type hold on iPhone and Mac", async (t) => {
+  if (!webkit) {
+    t.skip("playwright is not installed");
+    return;
+  }
+  let browser;
+  try {
+    browser = await webkit.launch();
+  } catch (error) {
+    t.skip(`webkit browser is not installed (${error.message})`);
+    return;
+  }
+  const layoutPort = port + 2;
+  const server = spawn("python3", ["-m", "http.server", String(layoutPort), "--bind", "127.0.0.1"], {
+    cwd: root,
+    stdio: "ignore"
+  });
+  const wait = () => new Promise((resolve, reject) => {
+    const started = Date.now();
+    const attempt = () => {
+      const socket = net.connect(layoutPort, "127.0.0.1");
+      socket.on("connect", () => {
+        socket.end();
+        resolve();
+      });
+      socket.on("error", () => {
+        socket.destroy();
+        if (Date.now() - started > 2000) reject(new Error("preview server did not start"));
+        else setTimeout(attempt, 50);
+      });
+    };
+    attempt();
+  });
+  try {
+    await wait();
+    const viewports = [
+      { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 },
+      { width: 1280, height: 800, isMobile: false, hasTouch: false, deviceScaleFactor: 1 },
+      { width: 375, height: 667, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }
+    ];
+    for (const viewport of viewports) {
+      const context = await browser.newContext({
+        viewport: { width: viewport.width, height: viewport.height },
+        isMobile: viewport.isMobile,
+        hasTouch: viewport.hasTouch,
+        deviceScaleFactor: viewport.deviceScaleFactor
+      });
+      const page = await context.newPage();
+      const base = `http://127.0.0.1:${layoutPort}`;
+      await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" });
+      await page.locator(".hero").waitFor();
+      const hero = await page.locator(".hero").evaluate((el) => getComputedStyle(el).backgroundImage);
+      assert.match(hero, /rgb\(110,\s*79,\s*240\)/, hero);
+
+      await page.goto(`${base}/#/play/sample-banana-flashlight/order`, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("check").waitFor();
+      const order = await page.evaluate(lessonDockMetrics);
+      assert.equal(await page.locator(".target-line").evaluate((el) => getComputedStyle(el).fontSize), "22px");
+      assert.equal(await page.locator(".target-line").evaluate((el) => getComputedStyle(el).fontWeight), "700");
+      assert.ok(order.gap >= 16, `progress gap ${order.gap}`);
+      assert.equal(order.overlaps, false);
+      assert.ok(order.scroll.bottom <= order.chips.top + 1);
+      assert.ok(order.chips.bottom <= order.check.top + 1);
+      assert.ok(order.vh - order.check.bottom >= 12 && order.vh - order.check.bottom <= 24);
+      assert.equal(order.safeArea, true);
+      const chip = await page.locator(".pool .token").first().evaluate((el) => {
+        const style = getComputedStyle(el);
+        return { bg: style.backgroundColor, border: style.borderTopColor };
+      });
+      assert.equal(chip.bg, "rgb(38, 38, 50)");
+      assert.equal(chip.border, "rgb(74, 74, 90)");
+
+      const tapped = await page.locator(".pool .token").first().evaluate((el) => {
+        el.click();
+        return el.className;
+      });
+      assert.match(tapped, /is-accept|is-reject/);
+      const built = await page.locator("[data-testid=tray]").evaluate((tray) => {
+        const probe = document.createElement("span");
+        probe.className = "token is-set";
+        probe.textContent = "line";
+        tray.appendChild(probe);
+        const style = getComputedStyle(probe);
+        const result = { size: style.fontSize, weight: style.fontWeight };
+        probe.remove();
+        return result;
+      });
+      assert.equal(built.size, "22px");
+      assert.equal(built.weight, "700");
+
+      await page.evaluate(() => {
+        const spacer = document.createElement("div");
+        spacer.style.height = "1400px";
+        document.querySelector(".play-scroll")?.appendChild(spacer);
+      });
+      const tall = await page.evaluate(lessonDockMetrics);
+      assert.equal(tall.overlaps, false);
+      assert.ok(tall.check.bottom <= tall.vh);
+      assert.ok(tall.vh - tall.check.bottom <= 24);
+
+      await page.goto(`${base}/#/play/sample-banana-flashlight/next`, { waitUntil: "domcontentloaded" });
+      await page.locator(".choice").first().waitFor();
+      const next = await page.evaluate(lessonDockMetrics);
+      assert.equal(next.overlaps, false);
+      assert.ok(next.chips.bottom > next.vh * 0.45, `chips should sit in the lower half, bottom ${next.chips.bottom}`);
+      await page.keyboard.press("1");
+      await page.getByTestId("feedback").waitFor();
+      const answer = await page.locator(".feedback .answer").evaluate((el) => {
+        const style = getComputedStyle(el);
+        return { size: style.fontSize, weight: style.fontWeight };
+      });
+      assert.equal(answer.size, "22px");
+      assert.equal(answer.weight, "700");
+      const after = await page.evaluate(lessonDockMetrics);
+      assert.equal(after.overlaps, false);
+      assert.ok(after.vh - after.check.bottom >= 12 && after.vh - after.check.bottom <= 24);
+      await page.keyboard.press("Enter");
+      await page.locator(".choice, [data-testid=final-score]").first().waitFor();
+      await context.close();
+    }
   } finally {
     server.kill();
     await browser.close();

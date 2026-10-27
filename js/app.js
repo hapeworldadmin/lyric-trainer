@@ -559,28 +559,30 @@ function viewPlay() {
     </div>
   ` : "";
   const around = contextHtml(question);
-  const check = !play.feedback && question.kind === "order" ? `
-    <div class="dock">
-      <button class="btn btn-primary" type="button" data-action="check" data-primary data-testid="check">Check <span class="key-hint">Enter</span></button>
-    </div>` : "";
+  const parts = play.feedback ? { tray: "", chips: "" } : answerParts(question);
+  const action = play.feedback ? continueControl(play) : (question.kind === "order" ? checkControl() : "");
+  const dock = `${play.feedback ? feedbackBody(play) : parts.chips}${action}`;
   return `
-    <section class="screen" data-testid="play">
-      <div class="play-top">
-        <button class="icon-btn" type="button" data-action="leave" data-testid="leave-lesson" aria-label="Close lesson">${icon("close")}</button>
-        <p class="play-crumb" data-testid="play-crumb">${escapeHtml(playCrumb(play, question))}</p>
-        <div class="play-meta">
-          <span class="score-pill" data-testid="score-pill">${formatScore(play.score)}</span>
-          <div class="hearts" data-testid="hearts" aria-label="${play.hearts} hearts left">${hearts}</div>
+    <section class="screen play-screen" data-testid="play">
+      <div class="play-scroll">
+        <div class="play-top">
+          <button class="icon-btn" type="button" data-action="leave" data-testid="leave-lesson" aria-label="Close lesson">${icon("close")}</button>
+          <p class="play-crumb" data-testid="play-crumb">${escapeHtml(playCrumb(play, question))}</p>
+          <div class="play-meta">
+            <span class="score-pill" data-testid="score-pill">${formatScore(play.score)}</span>
+            <div class="hearts" data-testid="hearts" aria-label="${play.hearts} hearts left">${hearts}</div>
+          </div>
         </div>
+        <div class="lesson-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${shown}" data-testid="lesson-progress">
+          <span style="width:${width}%"></span>
+        </div>
+        ${timer}
+        ${around.before}
+        ${questionHtml(question)}
+        ${around.after}
+        ${parts.tray}
       </div>
-      <div class="lesson-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${shown}" data-testid="lesson-progress">
-        <span style="width:${width}%"></span>
-      </div>
-      ${timer}
-      ${around.before}
-      ${questionHtml(question)}
-      ${around.after}
-      ${play.feedback ? feedbackHtml(play) : `${answerControls(question)}${check}`}
+      ${dock ? `<div class="answer-dock" data-testid="answer-dock">${dock}</div>` : ""}
     </section>
   `;
 }
@@ -657,16 +659,22 @@ function keyHint(index) {
   return `<span class="key-hint">${index + 1}</span>`;
 }
 
-function answerControls(question) {
+function answerParts(question) {
   if (question.choices && question.kind !== "order") {
-    return `<div class="choices">${question.choices.map((choice, index) => `
-      <button class="choice" type="button" data-action="choose" data-option="${index}" data-choice="${index}">${keyHint(index)}${escapeHtml(choice)}</button>
-    `).join("")}</div>`;
+    return {
+      tray: "",
+      chips: `<div class="choices">${question.choices.map((choice, index) => `
+        <button class="choice" type="button" data-action="choose" data-option="${index}" data-choice="${index}">${keyHint(index)}${escapeHtml(choice)}</button>
+      `).join("")}</div>`
+    };
   }
   if (question.kind === "swap") {
-    return `<div class="pool">${question.words.map((word, index) => `
-      <button class="token" type="button" data-action="pick-swap" data-option="${index}" data-token="${escapeHtml(word.id)}">${keyHint(index)}${escapeHtml(word.text)}</button>
-    `).join("")}</div>`;
+    return {
+      tray: "",
+      chips: `<div class="pool">${question.words.map((word, index) => `
+        <button class="token" type="button" data-action="pick-swap" data-option="${index}" data-token="${escapeHtml(word.id)}">${keyHint(index)}${escapeHtml(word.text)}</button>
+      `).join("")}</div>`
+    };
   }
   if (question.kind === "order" || question.kind === "lines" || question.kind === "sections") {
     const order = ensureOrder();
@@ -681,25 +689,32 @@ function answerControls(question) {
       <button class="token" type="button" data-action="pick-token" data-option="${index}" data-token="${escapeHtml(id)}">${keyHint(index)}${escapeHtml(byId.get(id)?.text || "")}</button>
     `).join("");
     const empty = question.kind === "sections" ? "The order appears here" : "Your line appears here";
-    return `
-      <div class="tray${stacked}" data-testid="tray">${placed || `<span class="hint">${empty}</span>`}</div>
-      <div class="pool${stacked}">${pool}</div>
-    `;
+    return {
+      tray: `<div class="tray${stacked}" data-testid="tray">${placed || `<span class="hint">${empty}</span>`}</div>`,
+      chips: `<div class="pool${stacked}">${pool}</div>`
+    };
   }
-  return "";
+  return { tray: "", chips: "" };
 }
 
-function feedbackHtml(play) {
+function checkControl() {
+  return `<div class="dock"><button class="btn btn-primary" type="button" data-action="check" data-primary data-testid="check">Check <span class="key-hint">Enter</span></button></div>`;
+}
+
+function continueControl(play) {
+  const nextLabel = play.hearts <= 0 || play.index >= play.questions.length - 1 ? "See results" : "Continue";
+  return `<div class="dock"><button class="btn btn-primary" type="button" data-action="continue" data-primary data-testid="continue">${nextLabel} <span class="key-hint">Enter</span></button></div>`;
+}
+
+function feedbackBody(play) {
   const feedback = play.feedback;
   const praise = feedback.correct ? "Correct" : (feedback.timeout ? "Time is up" : "Not quite");
   const xp = feedback.xp ? ` +${feedback.xp} XP` : "";
-  const nextLabel = play.hearts <= 0 || play.index >= play.questions.length - 1 ? "See results" : "Continue";
   return `
     <div class="feedback ${feedback.correct ? "is-good" : "is-bad"}" role="status" data-testid="feedback">
       <p><strong>${praise}${xp}</strong></p>
       <p class="answer">${escapeHtml(feedback.answer)}</p>
     </div>
-    <div class="dock"><button class="btn btn-primary" type="button" data-action="continue" data-primary data-testid="continue">${nextLabel} <span class="key-hint">Enter</span></button></div>
   `;
 }
 
