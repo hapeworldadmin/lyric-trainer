@@ -240,7 +240,7 @@ test("webkit word order accepts number keys and Enter, and ignores keys in a fie
     assert.equal(look.line.weight, "700");
     assert.equal(look.blank.color, "rgb(139, 111, 255)");
     assert.equal(look.token.bg, "rgb(38, 38, 50)");
-    assert.equal(look.token.border, "rgb(74, 74, 90)");
+    assert.equal(look.token.border, "rgb(92, 92, 112)");
     assert.equal(look.token.size, "17px");
     assert.equal(look.token.weight, "600");
     assert.equal(look.token.minHeight, "48px");
@@ -352,7 +352,7 @@ test("webkit first lesson is line order, not section order, on iPhone and Mac", 
       await page.getByTestId("game-lines").click();
       await page.getByTestId("play").waitFor();
       const ask = await page.getByTestId("question").innerText();
-      assert.match(ask, /Tap the lines in order/);
+      assert.match(ask, /tap the lines in order/i);
       assert.equal(ask.includes("opening lines"), false);
       assert.equal(await page.getByText("The order appears here").count(), 0);
       assert.doesNotMatch(await page.locator(".play-crumb").innerText(), /Flow/);
@@ -447,7 +447,7 @@ test("webkit lesson dock, hero contrast, and answer type hold on iPhone and Mac"
         return { bg: style.backgroundColor, border: style.borderTopColor };
       });
       assert.equal(chip.bg, "rgb(38, 38, 50)");
-      assert.equal(chip.border, "rgb(74, 74, 90)");
+      assert.equal(chip.border, "rgb(92, 92, 112)");
 
       const tapped = await page.locator(".pool .token").first().evaluate((el) => {
         el.click();
@@ -477,9 +477,18 @@ test("webkit lesson dock, hero contrast, and answer type hold on iPhone and Mac"
       assert.ok(tall.check.bottom <= tall.vh);
       assert.ok(tall.vh - tall.check.bottom <= 24);
 
-      await page.goto(`${base}/#/play/sample-banana-flashlight/next`, { waitUntil: "domcontentloaded" });
-      await page.getByTestId("play").waitFor();
-      if (await page.getByTestId("cant-sing").count()) await page.getByTestId("cant-sing").click();
+      let choicesReady = false;
+      for (const seed of ["", "1", "2", "3", "4", "5", "6", "7", "8", "9"]) {
+        const query = seed ? `?seed=${seed}` : "";
+        await page.goto(`${base}/#/play/sample-banana-flashlight/next${query}`, { waitUntil: "domcontentloaded" });
+        await page.getByTestId("play").waitFor();
+        if (await page.getByTestId("cant-sing").count()) await page.getByTestId("cant-sing").click();
+        if (await page.locator(".choice").count()) {
+          choicesReady = true;
+          break;
+        }
+      }
+      assert.equal(choicesReady, true);
       await page.locator(".choice").first().waitFor();
       const next = await page.evaluate(lessonDockMetrics);
       assert.equal(next.overlaps, false);

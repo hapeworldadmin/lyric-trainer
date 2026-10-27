@@ -23,6 +23,53 @@ export function normalizeAnswer(value) {
     .trim();
 }
 
+// Singing and typing cannot carry punctuation. Apostrophes, curly quotes, and
+// commas are removed, and contractions that are not real words collapse so
+// "you're", "youre", and "you are" are the same line.
+const GLUED_CONTRACTIONS = [
+  [/\byoure\b/g, "you are"],
+  [/\btheyre\b/g, "they are"],
+  [/\bim\b/g, "i am"],
+  [/\bdont\b/g, "do not"],
+  [/\bdoesnt\b/g, "does not"],
+  [/\bdidnt\b/g, "did not"],
+  [/\bcant\b/g, "cannot"],
+  [/\bwont\b/g, "will not"],
+  [/\bisnt\b/g, "is not"],
+  [/\barent\b/g, "are not"],
+  [/\bwasnt\b/g, "was not"],
+  [/\bwerent\b/g, "were not"],
+  [/\bcouldnt\b/g, "could not"],
+  [/\bshouldnt\b/g, "should not"],
+  [/\bwouldnt\b/g, "would not"],
+  [/\bhasnt\b/g, "has not"],
+  [/\bhavent\b/g, "have not"],
+  [/\bhadnt\b/g, "had not"],
+  [/\bive\b/g, "i have"],
+  [/\byouve\b/g, "you have"],
+  [/\bweve\b/g, "we have"],
+  [/\btheyve\b/g, "they have"],
+  [/\byoull\b/g, "you will"],
+  [/\btheyll\b/g, "they will"],
+  [/\bgonna\b/g, "going to"],
+  [/\bwanna\b/g, "want to"],
+  [/\bgotta\b/g, "got to"]
+];
+
+export function normalizeSing(value) {
+  let text = String(value ?? "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u201a\u201b\u2032`´]/g, "'")
+    .replace(/[\u201c\u201d\u201e\u201f\u00ab\u00bb]/g, " ");
+  // Drop apostrophes instead of turning them into spaces, so "you're" and
+  // "youre" collapse before contraction expansion.
+  text = text.replace(/'/g, "");
+  text = text.replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim();
+  for (const [pattern, replacement] of GLUED_CONTRACTIONS) text = text.replace(pattern, replacement);
+  return text.replace(/\s+/g, " ").trim();
+}
+
 export function contentKey(parts) {
   const text = (parts || []).map((part) => normalizeAnswer(part)).join("|");
   let hash = 5381;
