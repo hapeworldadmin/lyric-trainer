@@ -16,8 +16,9 @@ import {
   pointsFor,
   questionSeconds,
   sectionProgress,
-  seededRng
-} from "./games.js?v=10";
+  seededRng,
+  singingMatch
+} from "./games.js?v=11";
 import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=9";
 import {
   addBonusXp,
@@ -46,8 +47,9 @@ import {
   saveState,
   seedSample
 } from "./storage.js?v=9";
-import { createLineRecognizer, speechRecognitionSupported } from "./speech.js?v=10";
-import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=9";
+import { createLineRecognizer, speechRecognitionSupported } from "./speech.js?v=11";
+import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=11";
+import { interpretHearing } from "./voice.js?v=11";
 
 const session = {
   state: null,
@@ -131,8 +133,33 @@ async function boot() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") stopListening();
   });
+  bindPlayViewport();
   if (!location.hash) location.hash = "#/";
   sync();
+}
+
+function fitPlayViewport() {
+  const app = document.querySelector(".app.is-play");
+  if (!app) return;
+  const viewport = window.visualViewport;
+  if (!viewport) {
+    app.style.height = "";
+    app.style.transform = "";
+    return;
+  }
+  const top = viewport.offsetTop || 0;
+  app.style.height = `${Math.round(viewport.height)}px`;
+  app.style.transform = top ? `translateY(${top}px)` : "";
+}
+
+let viewportBound = false;
+
+function bindPlayViewport() {
+  if (viewportBound) return;
+  viewportBound = true;
+  window.visualViewport?.addEventListener("resize", fitPlayViewport);
+  window.visualViewport?.addEventListener("scroll", fitPlayViewport);
+  window.addEventListener("resize", fitPlayViewport);
 }
 
 function parseHash() {
@@ -587,10 +614,12 @@ function viewPlay() {
           <span style="width:${width}%"></span>
         </div>
         ${timer}
-        ${around.before}
-        ${questionHtml(question)}
-        ${around.after}
-        ${parts.tray}
+        <div class="play-body">
+          ${around.before}
+          ${questionHtml(question)}
+          ${around.after}
+          ${parts.tray}
+        </div>
       </div>
       ${dock ? `<div class="answer-dock" data-testid="answer-dock">${dock}</div>` : ""}
     </section>
@@ -610,17 +639,26 @@ function playCrumb(play, question) {
   return place ? `${play.gameName} · ${place}` : play.gameName;
 }
 
+function qLabel(text, testid = "") {
+  const attr = testid ? ` data-testid="${testid}"` : "";
+  return `<p class="q-label"${attr}>${escapeHtml(text)}</p>`;
+}
+
+function lyricBlock(text, testid = "") {
+  const attr = testid ? ` data-testid="${testid}"` : "";
+  return `<div class="lyric-block"><p class="lyric-line"${attr}>${escapeHtml(text)}</p></div>`;
+}
+
 function contextHtml(question) {
   const context = question?.context;
   if (!context) return { before: "", after: "" };
   const showPrevious = context.previous && question.kind !== "next" && !question.hidesPrevious && !question.sing;
-  let previous = showPrevious ? `<p class="context-line is-anchor" data-testid="context-previous">${escapeHtml(context.previous)}</p>` : "";
+  let previous = showPrevious ? `${qLabel("Previous line")}${lyricBlock(context.previous, "context-previous")}` : "";
   if (question.sing && question.prompt) {
-    previous = `<p class="context-meta">Previous line</p><p class="context-line is-anchor" data-testid="context-previous">${escapeHtml(question.prompt)}</p>`;
+    previous = `${qLabel("Previous line")}${lyricBlock(question.prompt, "context-previous")}`;
   }
   const allowNext = session.play?.gameId === "lines" && question.kind === "lines";
-  const next = allowNext && context.next
-    ? `<p class="context-line" data-testid="context-next">${escapeHtml(context.next)}</p>` : "";
+  const next = allowNext && context.next ? lyricBlock(context.next, "context-next") : "";
   return { before: previous, after: next };
 }
 
@@ -631,7 +669,7 @@ function voiceReady() {
 function questionHtml(question) {
   if (question.sing) {
     const ask = voiceReady() ? "Sing or type the next line" : "Type the next line";
-    return `<p class="ask" data-testid="question">${ask}</p>`;
+    return qLabel(ask, "question");
   }
   if (question.kind === "order") return orderTargetHtml(question);
   if (question.kind === "fill") {
@@ -639,27 +677,26 @@ function questionHtml(question) {
     const before = question.before ? `${escapeHtml(question.before)} ` : "";
     const after = question.after ? ` ${escapeHtml(question.after)}` : "";
     const blank = picked ? escapeHtml(picked) : "";
-    return `<p class="target-line" data-testid="question">${before}<span class="target-blank ${picked ? "filled" : ""}">${blank}</span>${after}</p>`;
+    return `${qLabel("Fill the blank")}<p class="target-line" data-testid="question">${before}<span class="target-blank ${picked ? "filled" : ""}">${blank}</span>${after}</p>`;
   }
   if (question.kind === "next") {
-    return `<p class="target-line" data-testid="question">${escapeHtml(question.prompt)}</p><p class="ask">What comes next?</p>`;
+    return `<div class="lyric-block"><p class="lyric-line target-line" data-testid="question">${escapeHtml(question.prompt)}</p></div>${qLabel("What comes next?")}`;
   }
   if (question.kind === "previous") {
-    return `<p class="target-line" data-testid="question">${escapeHtml(question.prompt)}</p><p class="ask">What comes before?</p>`;
+    return `<div class="lyric-block"><p class="lyric-line target-line" data-testid="question">${escapeHtml(question.prompt)}</p></div>${qLabel("What comes before?")}`;
   }
   if (question.kind === "letters") {
-    return `<p class="hint-line" data-testid="question">${escapeHtml(question.hint)}</p><p class="ask">Pick the line</p>`;
+    return `<p class="hint-line" data-testid="question">${escapeHtml(question.hint)}</p>${qLabel("Pick the line")}`;
   }
   if (question.kind === "truth") {
-    return `<p class="target-line" data-testid="question">${escapeHtml(question.prompt)}</p><p class="ask">Does this line come right after?</p><p class="target-line">${escapeHtml(question.claim)}</p>`;
+    return `<div class="lyric-block"><p class="lyric-line target-line" data-testid="question">${escapeHtml(question.prompt)}</p></div>${qLabel("Does this line come right after?")}<div class="lyric-block"><p class="lyric-line target-line">${escapeHtml(question.claim)}</p></div>`;
   }
   if (question.kind === "which") {
-    return `<p class="target-line" data-testid="question">${escapeHtml(question.prompt)}</p><p class="ask">Which section is this?</p>`;
+    return `<div class="lyric-block"><p class="lyric-line target-line" data-testid="question">${escapeHtml(question.prompt)}</p></div>${qLabel("Which section is this?")}`;
   }
-  if (question.kind === "intruder") return `<p class="ask" data-testid="question">Which line does not belong?</p>`;
-  if (question.kind === "swap") return `<p class="ask" data-testid="question">Tap the word that does not belong</p>`;
-  if (question.kind === "lines") return `<p class="ask" data-testid="question">Tap the lines in order</p>`;
-  return `<p class="ask" data-testid="question">Tap the words in order</p>`;
+  if (question.kind === "intruder") return qLabel("Which line does not belong?", "question");
+  if (question.kind === "lines") return qLabel("Tap the lines in order", "question");
+  return qLabel("Tap the words in order", "question");
 }
 
 function orderTargetHtml(question) {
@@ -671,7 +708,7 @@ function orderTargetHtml(question) {
     if (!placed) return `<span class="target-blank"></span>`;
     return `<span class="target-word">${escapeHtml(placed)}</span>`;
   }).join(" ");
-  return `<p class="target-line" data-testid="question">${words}</p>`;
+  return `${qLabel("Put the words in order")}<div class="lyric-block"><p class="target-line" data-testid="question">${words}</p></div>`;
 }
 
 function keyHint(index) {
@@ -683,22 +720,32 @@ function singAnswerParts() {
   const play = session.play;
   const voice = voiceReady();
   const listening = Boolean(play?.listening) && voice;
-  const heard = escapeHtml(play?.typed || "");
+  const transcript = escapeHtml(listening ? (play?.voiceDisplay || "") : "");
+  const fieldValue = escapeHtml(listening ? "" : (play?.typed || ""));
+  const wrong = Boolean(play?.miss);
   const mic = voice ? `
     <button class="mic-btn${listening ? " is-listening" : ""}" type="button" data-action="toggle-mic" data-testid="mic" aria-pressed="${listening ? "true" : "false"}" aria-label="${listening ? "Stop listening" : "Sing or speak"}">${icon("mic")}</button>` : "";
+  const choices = voice ? `<button class="btn btn-ghost" type="button" data-action="cant-sing" data-testid="cant-sing">Show choices</button>` : "";
+  const heard = wrong && play.miss.heard
+    ? `<p class="heard-note" data-testid="heard-note">Heard: ${escapeHtml(play.miss.heard)}</p>` : "";
+  const miss = wrong ? `<p class="sing-miss" data-testid="sing-miss">${escapeHtml(play.miss.message)}</p>${heard}` : "";
+  const reveal = (play?.questionMistakes || 0) >= 2
+    ? `<button class="btn btn-ghost" type="button" data-action="show-answer" data-testid="show-answer">Show answer</button>` : "";
   return {
     tray: "",
     chips: `
       <form id="answer-form" class="sing-form" data-testid="sing-form">
         <p class="sing-status" data-testid="listen-status" ${listening ? "" : "hidden"}>Listening</p>
-        <div class="sing-field" id="sing-field" data-testid="sing-field">
-          <p class="live-transcript" data-testid="live-transcript" ${listening && play?.typed ? "" : "hidden"}>${heard}</p>
+        ${miss}
+        <div class="sing-field${wrong ? " is-wrong" : ""}" id="sing-field" data-testid="sing-field">
+          <p class="live-transcript" data-testid="live-transcript" ${listening && play?.voiceDisplay ? "" : "hidden"}>${transcript}</p>
           <div class="sing-row">
-            <input class="sing-input" id="answer-input" data-testid="sing-input" type="text" enterkeyhint="done" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Type the next line" aria-label="Next line" value="${heard}">
+            <input class="sing-input" id="answer-input" data-testid="sing-input" type="text" enterkeyhint="done" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Next line" value="${fieldValue}">
             ${mic}
           </div>
         </div>
-        <button class="btn btn-secondary" type="button" data-action="cant-sing" data-testid="cant-sing">Can't sing now</button>
+        ${choices}
+        ${reveal}
         <button class="btn btn-primary" type="submit" data-action="check" data-primary data-testid="check">Check <span class="key-hint">Enter</span></button>
       </form>`
   };
@@ -711,14 +758,6 @@ function answerParts(question) {
       tray: "",
       chips: `<div class="choices">${question.choices.map((choice, index) => `
         <button class="choice" type="button" data-action="choose" data-option="${index}" data-choice="${index}">${keyHint(index)}${escapeHtml(choice)}</button>
-      `).join("")}</div>`
-    };
-  }
-  if (question.kind === "swap") {
-    return {
-      tray: "",
-      chips: `<div class="pool">${question.words.map((word, index) => `
-        <button class="token" type="button" data-action="pick-swap" data-option="${index}" data-token="${escapeHtml(word.id)}">${keyHint(index)}${escapeHtml(word.text)}</button>
       `).join("")}</div>`
     };
   }
@@ -1342,6 +1381,10 @@ function ensurePlay() {
     typed: "",
     listening: false,
     voiceOff: false,
+    voiceRaw: "",
+    voiceDisplay: "",
+    fromVoice: false,
+    miss: null,
     order: null,
     questionMistakes: 0,
     deadline: null,
@@ -1380,28 +1423,39 @@ function paintListening() {
   const status = document.querySelector("[data-testid=listen-status]");
   if (status) status.hidden = !on;
   const live = document.querySelector("[data-testid=live-transcript]");
-  if (live) live.hidden = !on || !play?.typed;
+  if (live) live.hidden = !on || !play?.voiceDisplay;
 }
 
-function showHeard(text) {
+function showHeard(text, meta = {}) {
   const play = session.play;
   if (!play) return;
-  play.typed = text;
+  const display = String(text || "");
+  play.voiceDisplay = display;
+  play.voiceRaw = String(meta.raw || display);
+  play.fromVoice = true;
   const input = document.getElementById("answer-input");
   const live = document.querySelector("[data-testid=live-transcript]");
-  if (input) input.value = text;
+  if (input && play.listening) input.value = "";
   if (live) {
-    live.textContent = text;
-    live.hidden = !text;
+    live.textContent = display;
+    live.hidden = !play.listening || !display;
   }
 }
 
 function stopListening() {
   const play = session.play;
+  const wasListening = Boolean(play?.listening);
   if (play) play.listening = false;
   const current = ear;
   ear = null;
   current?.abort();
+  if (wasListening && play?.fromVoice) {
+    const input = document.getElementById("answer-input");
+    if (input && !input.value && play.voiceDisplay) {
+      input.value = play.voiceDisplay;
+      play.typed = play.voiceDisplay;
+    }
+  }
   paintListening();
 }
 
@@ -1414,10 +1468,13 @@ function toggleMic() {
     return;
   }
   if (!speechRecognitionSupported() || play.voiceOff) return;
+  const song = findSong(play.songId);
   const next = createLineRecognizer({
-    onTranscript(text) {
+    expected: question.answer || question.line || "",
+    vocabulary: song?.lines || [],
+    onTranscript(text, meta) {
       if (session.play !== play || !play.listening) return;
-      showHeard(text);
+      showHeard(text, meta);
     },
     onDenied() {
       if (session.play !== play) return;
@@ -1460,6 +1517,10 @@ function cantSing() {
   question.sing = false;
   play.typed = "";
   play.listening = false;
+  play.voiceRaw = "";
+  play.voiceDisplay = "";
+  play.fromVoice = false;
+  play.miss = null;
   render();
 }
 
@@ -1467,13 +1528,21 @@ function judgeSing() {
   const play = session.play;
   const question = currentQuestion();
   if (!play || play.locked || play.orderBusy || !question?.sing) return;
-  const given = (document.getElementById("answer-input")?.value ?? play.typed ?? "").trim();
+  const typedNow = (document.getElementById("answer-input")?.value ?? play.typed ?? "").trim();
+  const voiceRaw = (play.voiceRaw || "").trim();
+  const voiceDisplay = (play.voiceDisplay || "").trim();
+  const fromVoice = Boolean(play.fromVoice && voiceRaw) && (!typedNow || typedNow === voiceDisplay);
+  const given = fromVoice ? voiceRaw : typedNow;
   if (!given) return;
   play.orderBusy = true;
-  play.typed = given;
+  play.typed = fromVoice ? (voiceDisplay || voiceRaw) : typedNow;
+  const expected = question.answer || question.line || "";
+  const song = findSong(play.songId);
+  const correct = fromVoice
+    ? interpretHearing(expected, [voiceRaw], song?.lines || []).pass
+    : singingMatch(expected, given);
   stopListening();
   const field = document.getElementById("sing-field");
-  const correct = gradeAnswer(question, given);
   field?.classList.add(correct ? "is-accept" : "is-reject");
   buzz(correct ? 12 : 20);
   blip(correct ? "ok" : "bad", session.state.settings.sound);
@@ -1481,16 +1550,32 @@ function judgeSing() {
     play.combo = 0;
     play.questionMistakes += 1;
     play.hearts = Math.max(0, play.hearts - 1);
+    play.miss = {
+      message: "Not quite, try again",
+      heard: fromVoice ? voiceRaw : ""
+    };
     paintHearts();
+  } else {
+    play.miss = null;
   }
   const failed = !correct && play.hearts <= 0;
   window.setTimeout(() => {
     if (session.play !== play) return;
     play.orderBusy = false;
     field?.classList.remove("is-reject", "is-accept");
-    if (correct) submitCurrent({ singText: given });
+    if (correct) submitCurrent({ singText: given, singVoice: fromVoice });
     else if (failed) submitCurrent({ singFailed: true });
+    else render();
   }, motionDelay());
+}
+
+function revealSingAnswer() {
+  const play = session.play;
+  const question = currentQuestion();
+  if (!play || play.locked || play.orderBusy || !question?.sing) return;
+  if ((play.questionMistakes || 0) < 2) return;
+  stopListening();
+  submitCurrent({ singFailed: true });
 }
 
 function submitCurrent(forced = null) {
@@ -1502,16 +1587,15 @@ function submitCurrent(forced = null) {
   let correct = false;
   if (forced?.timeout) {
     correct = false;
-  } else if (question.kind === "swap") {
-    if (!forced?.swapId) return;
-    correct = gradeAnswer(question, forced.swapId);
   } else if (question.sing) {
     if (forced?.singFailed) {
       correct = false;
     } else {
       const given = String(forced?.singText ?? "").trim();
       if (!given) return;
-      correct = gradeAnswer(question, given);
+      correct = forced?.singVoice
+        ? interpretHearing(question.answer || question.line, [given], song.lines || []).pass
+        : singingMatch(question.answer || question.line, given);
     }
   } else if (question.choices) {
     play.picked = forced?.choice ?? play.picked;
@@ -1599,6 +1683,10 @@ function continueLesson() {
   play.picked = null;
   play.typed = "";
   play.listening = false;
+  play.voiceRaw = "";
+  play.voiceDisplay = "";
+  play.fromVoice = false;
+  play.miss = null;
   play.order = null;
   play.questionMistakes = 0;
   play.deadline = null;
@@ -1950,6 +2038,7 @@ function afterRender() {
   const paste = document.querySelector("[data-testid=paste-clipboard]");
   if (paste) paste.addEventListener("click", onClickPaste);
   startTimer();
+  fitPlayViewport();
 }
 
 function onSheetPaste(event) {
@@ -2101,21 +2190,8 @@ function onClick(event) {
   else if (action === "cant-sing") cantSing();
   else if (action === "pick-token") {
     judgePickedToken(el);
-  } else if (action === "pick-swap") {
-    const button = el;
-    const question = currentQuestion();
-    const word = question?.words?.find((item) => item.id === button.dataset.token);
-    if (!word || !session.play || session.play.locked) return;
-    button.classList.add(word.wrong ? "is-accept" : "is-reject");
-    if (!word.wrong) {
-      session.play.questionMistakes += 1;
-      session.play.hearts = Math.max(0, session.play.hearts - 1);
-      paintHearts();
-      if (session.play.hearts <= 0) submitCurrent({ swapId: word.id });
-      return;
-    }
-    submitCurrent({ swapId: word.id });
-  } else if (action === "check") {
+  } else if (action === "show-answer") revealSingAnswer();
+  else if (action === "check") {
     if (currentQuestion()?.sing) judgeSing();
     else submitCurrent();
   }
@@ -2201,7 +2277,17 @@ async function copyShare() {
 
 function onInput(event) {
   if (event.target.id === "answer-input") {
-    if (session.play) session.play.typed = event.target.value;
+    const value = event.target.value;
+    if (session.play) {
+      session.play.typed = value;
+      if (session.play.fromVoice && value.trim() !== (session.play.voiceDisplay || "").trim()) session.play.fromVoice = false;
+      if (session.play.miss) {
+        session.play.miss = null;
+        document.getElementById("sing-field")?.classList.remove("is-wrong");
+        document.querySelector("[data-testid=sing-miss]")?.remove();
+        document.querySelector("[data-testid=heard-note]")?.remove();
+      }
+    }
     if (event.isTrusted && session.play?.listening) stopListening();
   }
   if (event.target.id === "lyrics") onLyricsInput(event);

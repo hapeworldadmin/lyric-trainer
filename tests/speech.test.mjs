@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
 import { applyRecognitionSettings, createLineRecognizer, speechRecognitionSupported } from "../js/speech.js";
 
 const iphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
@@ -15,6 +15,7 @@ test("speech recognition uses the webkit name and stays quiet until start", () =
   assert.equal(ios.ios, true);
   assert.equal(iosRecognition.continuous, false);
   assert.equal(iosRecognition.interimResults, true);
+  assert.equal(iosRecognition.maxAlternatives, 5);
   assert.equal(iosRecognition.lang, "en-US");
 
   const macRecognition = {};
@@ -88,4 +89,103 @@ test("a recognizer does not listen until start, and a denied mic stays quiet", (
   assert.equal(denied, 1);
   assert.equal(unsupported, 0);
   assert.equal(createLineRecognizer({}, {}), null);
+});
+
+test("recognition keeps every alternative and prefers the lyric, without throwing when hints are missing", () => {
+  const events = [];
+  class Fake {
+    constructor() { Fake.last = this; }
+    start() { events.push("start"); }
+    stop() { this.onend?.(); }
+    abort() { this.onend?.(); }
+  }
+  class Grammar {
+    constructor() { Grammar.built += 1; this.items = []; }
+    addFromString(body, weight) { this.items.push([body, weight]); }
+  }
+  Grammar.built = 0;
+  let heard = null;
+  const root = {
+    webkitSpeechRecognition: Fake,
+    webkitSpeechGrammarList: Grammar,
+    navigator: { userAgent: mac, language: "en-US", platform: "MacIntel", maxTouchPoints: 0 }
+  };
+  const ear = createLineRecognizer({
+    expected: "No matter how it all plays out",
+    vocabulary: ["goldfish", "hallway"],
+    onTranscript(text, meta) { heard = { text, meta }; }
+  }, root);
+  ear.start();
+  Fake.last.onresult({
+    resultIndex: 0,
+    results: [{
+      0: { transcript: "snow weather cow" },
+      1: { transcript: "no mater how it all plays out" },
+      isFinal: false,
+      length: 2
+    }]
+  });
+  assert.equal(Fake.last.maxAlternatives, 5);
+  assert.equal(Grammar.built, 1);
+  assert.match(Fake.last.grammars.items[0][0], /matter/);
+  assert.match(Fake.last.grammars.items[0][0], /goldfish/);
+  assert.equal(heard.meta.raw, "no mater how it all plays out");
+  assert.match(heard.text, /matter/);
+  ear.abort();
+
+  class Touchy {
+    constructor() { Touchy.last = this; }
+    start() {}
+    stop() {}
+    abort() {}
+    set contextualStrings(_value) { throw new Error("safari"); }
+    get contextualStrings() { return undefined; }
+  }
+  class BrokenList {
+    constructor() { throw new Error("safari"); }
+  }
+  assert.doesNotThrow(() => {
+    createLineRecognizer({
+      expected: "You're the why",
+      vocabulary: ["stay"]
+    }, {
+      webkitSpeechRecognition: Touchy,
+      SpeechGrammarList: BrokenList,
+      navigator: { userAgent: iphone, language: "en-US", platform: "iPhone", maxTouchPoints: 5 }
+    });
+  });
+});
+
+test("listening stays open until about two seconds of silence", () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    let ended = 0;
+    class Fake {
+      constructor() { Fake.last = this; }
+      start() { Fake.starts += 1; }
+      stop() { this.onend?.(); }
+      abort() { this.onend?.(); }
+    }
+    Fake.starts = 0;
+    const ear = createLineRecognizer({
+      expected: "soft and slow",
+      onEnd() { ended += 1; }
+    }, {
+      webkitSpeechRecognition: Fake,
+      navigator: { userAgent: iphone, language: "en-US", platform: "iPhone", maxTouchPoints: 5 }
+    });
+    ear.start();
+    Fake.last.onresult({
+      resultIndex: 0,
+      results: [{ 0: { transcript: "soft and slo" }, isFinal: false, length: 1 }]
+    });
+    assert.equal(ended, 0);
+    mock.timers.tick(1999);
+    assert.equal(ended, 0);
+    mock.timers.tick(20);
+    assert.equal(ended, 1);
+    ear.abort();
+  } finally {
+    mock.timers.reset();
+  }
 });

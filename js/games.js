@@ -1,5 +1,5 @@
 import { inferSections } from "./parse.js?v=9";
-import { contentKey, displayToken, mulberry32, normalizeAnswer, shuffle, tokenize, wordCount } from "./text.js?v=9";
+import { contentKey, displayToken, mulberry32, normalizeAnswer, normalizeSing, shuffle, tokenize, wordCount } from "./text.js?v=11";
 
 export const GAMES = [
   { id: "lines", name: "Build", detail: "Line order in short rounds", group: "main" },
@@ -24,7 +24,6 @@ const FINAL_WEIGHTS = [
   { type: "next", weight: 3 },
   { type: "fill", weight: 3 },
   { type: "letters", weight: 3 },
-  { type: "swap", weight: 2 },
   { type: "truth", weight: 3 },
   { type: "lines", weight: 1 }
 ];
@@ -117,8 +116,8 @@ export function answersMatch(expected, given) {
 const SING_WORD_MATCH = 0.7;
 
 export function singingMatch(expected, given) {
-  const answer = normalizeAnswer(expected).split(" ").filter(Boolean);
-  const heard = normalizeAnswer(given).split(" ").filter(Boolean);
+  const answer = normalizeSing(expected).split(" ").filter(Boolean);
+  const heard = normalizeSing(given).split(" ").filter(Boolean);
   if (!answer.length || !heard.length) return false;
   let cursor = 0;
   let matched = 0;
@@ -133,7 +132,7 @@ export function singingMatch(expected, given) {
 
 export function pointsFor({ kind, correct, combo, secondsLeft }) {
   if (!correct) return { xp: 0, score: 0 };
-  const base = { fill: 10, next: 10, order: 12, letters: 15, lines: 14, previous: 10, swap: 12, intruder: 12, which: 10, truth: 10 }[kind] || 10;
+  const base = { fill: 10, next: 10, order: 12, letters: 15, lines: 14, previous: 10, intruder: 12, which: 10, truth: 10 }[kind] || 10;
   const xp = base + Math.min(10, Math.max(0, combo - 1) * 2);
   let score = 100 + combo * 10;
   if (typeof secondsLeft === "number") score += Math.max(0, Math.round(secondsLeft * 8));
@@ -176,10 +175,6 @@ export function correctLine(question) {
 
 export function gradeAnswer(question, given) {
   if (!question) return false;
-  if (question.kind === "swap") {
-    const word = (question.words || []).find((item) => item.id === given);
-    return Boolean(word?.wrong);
-  }
   if (question.kind === "order" || question.kind === "lines") {
     return isOrderCorrect(question, given);
   }
@@ -328,7 +323,6 @@ function makeByKind(kind, lines, sections, index, rng, span = 0) {
   if (kind === "letters") return makeLetters(lines, index, rng);
   if (kind === "next") return makeNext(lines, index, rng);
   if (kind === "previous") return makePrevious(lines, index, rng);
-  if (kind === "swap") return makeSwap(lines, index, rng);
   if (kind === "truth") return makeTruth(lines, index, rng);
   if (kind === "which") return makeWhich(lines, sections, index, rng);
   if (kind === "intruder") return makeIntruder(lines, sections, rng);
@@ -363,7 +357,6 @@ function varied(lines, sections, rng, weights, count) {
 
 const BUILD_WEIGHTS = [
   { type: "fill", weight: 2 },
-  { type: "swap", weight: 2 },
   { type: "intruder", weight: 2 },
   { type: "next", weight: 2 },
   { type: "previous", weight: 1 }
@@ -410,7 +403,6 @@ function canFinal(type, lines, index) {
   if (type === "lines") return rest >= 3;
   if (type === "next" || type === "truth") return rest >= 2;
   if (type === "fill") return Boolean(chooseBlank(tokenize(lines[index] || ""), () => 0));
-  if (type === "swap") return Boolean(chooseBlank(tokenize(lines[index] || ""), () => 0));
   if (type === "letters") return tokenize(lines[index] || "").length >= 1;
   return false;
 }
@@ -660,29 +652,6 @@ function makeLetters(lines, index, rng) {
     choices: distractors.length ? shuffle([line, ...distractors], rng) : [line],
     span: 1,
     roundLines: [line]
-  };
-}
-
-function makeSwap(lines, index, rng) {
-  const parts = tokenize(lines[index]);
-  const chosen = chooseBlank(parts, rng);
-  if (!chosen) return null;
-  const answer = displayToken(chosen.token);
-  const decoy = shuffle(collectDistractors(lines, answer), rng)[0];
-  if (!decoy) return null;
-  const words = parts.map((token, tokenIndex) => ({
-    id: `w${tokenIndex}`,
-    text: tokenIndex === chosen.index ? decoy : displayToken(token),
-    wrong: tokenIndex === chosen.index
-  }));
-  return {
-    kind: "swap",
-    lineIndex: index,
-    line: lines[index],
-    words,
-    answer,
-    span: 1,
-    roundLines: [lines[index]]
   };
 }
 

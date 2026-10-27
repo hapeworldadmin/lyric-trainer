@@ -226,8 +226,6 @@ test("answer checking ignores case, quotes, and punctuation, and the reveal keep
   assert.equal(gradeAnswer({ kind: "intruder", answer: "zeta eleven twelve" }, "zeta, eleven twelve"), true);
   assert.equal(gradeAnswer({ kind: "letters", answer: "gamma five six" }, "Gamma five six"), true);
   assert.equal(gradeAnswer({ kind: "fill", answer: "glow" }, "Glow"), true);
-  assert.equal(gradeAnswer({ kind: "swap", words: [{ id: "w0", wrong: false }, { id: "w1", wrong: true }] }, "w1"), true);
-  assert.equal(gradeAnswer({ kind: "swap", words: [{ id: "w0", wrong: false }, { id: "w1", wrong: true }] }, "w0"), false);
 });
 
 test("the timer is about two seconds plus half a second per word", () => {
@@ -245,7 +243,7 @@ test("question types do not repeat more than twice in a row", () => {
     { type: "next", weight: 3 },
     { type: "fill", weight: 3 },
     { type: "letters", weight: 2 },
-    { type: "swap", weight: 2 },
+    { type: "order", weight: 2 },
     { type: "truth", weight: 2 }
   ], 40, seededRng(9));
   assert.equal(mixed.length, 40);
@@ -260,6 +258,7 @@ test("question types do not repeat more than twice in a row", () => {
     for (let index = 2; index < kinds.length; index += 1) {
       assert.equal(kinds[index] === kinds[index - 1] && kinds[index] === kinds[index - 2], false, gameId);
     }
+    assert.equal(lesson.some((question) => question.kind === "swap"), false, gameId);
   }
 });
 
@@ -331,6 +330,16 @@ test("sung answers ignore case and punctuation and accept most words in order", 
   assert.equal(gradeAnswer({ kind: "next", sing: true, answer: line }, "two three four five six seven"), true);
   assert.equal(gradeAnswer({ kind: "next", sing: true, answer: line }, "nope"), false);
   assert.equal(gradeAnswer({ kind: "next", answer: line }, "two three four five six seven"), false);
+  const why = "You're the why";
+  assert.equal(singingMatch(why, "youre the why"), true);
+  assert.equal(singingMatch(why, "you are the why"), true);
+  assert.equal(singingMatch(why, "You’re the why"), true);
+  assert.equal(singingMatch("You're the why,", "youre the why"), true);
+  assert.equal(singingMatch("Don't stop, world!", "dont stop world"), true);
+  assert.equal(singingMatch("Don't stop, world!", "do not stop world"), true);
+  assert.equal(singingMatch("we're here", "were here"), true);
+  assert.equal(singingMatch(why, "nope nope nope"), false);
+  assert.equal(gradeAnswer({ kind: "next", sing: true, answer: why }, "you are the why"), true);
 });
 
 test("about one in three next-line questions can be sung, and the final run has a couple", () => {

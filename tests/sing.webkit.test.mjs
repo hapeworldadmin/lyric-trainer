@@ -149,9 +149,44 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
       assert.equal(idleText.includes(question.answer), false);
       assert.equal(await page.getByTestId("context-previous").innerText(), question.prompt);
       assert.equal(await page.getByTestId("context-next").count(), 0);
-      assert.match(await page.getByTestId("question").innerText(), /Sing or type the next line/);
+      assert.match(await page.getByTestId("question").innerText(), /sing or type the next line/i);
       assert.equal(await page.locator(".btn-primary").count(), 1);
-      assert.equal(await page.getByTestId("cant-sing").innerText(), "Can't sing now");
+      assert.equal(await page.getByTestId("cant-sing").innerText(), "Show choices");
+      assert.equal(await page.getByTestId("sing-input").getAttribute("placeholder"), null);
+      const hierarchy = await page.evaluate(() => {
+        const lyric = getComputedStyle(document.querySelector("[data-testid=context-previous]"));
+        const label = getComputedStyle(document.querySelector("[data-testid=question]"));
+        const input = getComputedStyle(document.querySelector(".sing-row .sing-input"));
+        const ghost = getComputedStyle(document.querySelector("[data-testid=cant-sing]"));
+        const check = getComputedStyle(document.querySelector("[data-testid=check]"));
+        return {
+          lyricSize: lyric.fontSize,
+          lyricWeight: Number(lyric.fontWeight),
+          lyricColor: lyric.color,
+          labelSize: label.fontSize,
+          labelTransform: label.textTransform,
+          labelWeight: Number(label.fontWeight),
+          inputSize: input.fontSize,
+          inputWeight: Number(input.fontWeight),
+          inputBorder: input.borderTopWidth,
+          inputBorderColor: input.borderTopColor,
+          ghostBg: ghost.backgroundColor,
+          ghostColor: ghost.color,
+          checkBg: check.backgroundColor
+        };
+      });
+      assert.equal(hierarchy.lyricSize, "22px");
+      assert.ok(hierarchy.lyricWeight >= 600 && hierarchy.lyricWeight <= 700);
+      assert.equal(hierarchy.lyricColor, "rgb(245, 245, 247)");
+      assert.equal(hierarchy.labelSize, "12px");
+      assert.equal(hierarchy.labelTransform, "uppercase");
+      assert.equal(hierarchy.labelWeight, 600);
+      assert.equal(hierarchy.inputSize, "17px");
+      assert.equal(hierarchy.inputWeight, 600);
+      assert.equal(hierarchy.inputBorder, "1px");
+      assert.equal(hierarchy.inputBorderColor, "rgb(74, 74, 90)");
+      assert.notEqual(hierarchy.ghostBg, hierarchy.checkBg);
+      assert.equal(hierarchy.ghostColor, "rgb(161, 161, 170)");
       const hint = await page.locator(".btn-primary .key-hint").evaluate((el) => getComputedStyle(el).display);
       if (viewport.isMobile) assert.equal(hint, "none");
       else assert.notEqual(hint, "none");
@@ -178,7 +213,7 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
       await page.getByTestId("mic").click();
       await page.getByTestId("live-transcript").waitFor();
       assert.equal(await page.getByTestId("live-transcript").innerText(), heard);
-      assert.equal(await page.getByTestId("sing-input").inputValue(), heard);
+      assert.equal(await page.getByTestId("sing-input").inputValue(), "");
       assert.match(await page.getByTestId("listen-status").innerText(), /Listening/i);
       const listening = await page.evaluate(() => ({
         starts: window.__starts,
@@ -200,7 +235,7 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
       assert.equal(await page.getByTestId("sing-input").count(), 0);
       assert.equal(await page.getByTestId("mic").count(), 0);
       assert.equal(await page.getByTestId("context-next").count(), 0);
-      assert.match(await page.locator("body").innerText(), /What comes next\?/);
+      assert.match(await page.locator("body").innerText(), /what comes next\?/i);
       assert.equal(await page.locator(".btn-primary").count(), 0);
       const choiceText = await page.locator(".choice").allInnerTexts();
       assert.equal(choiceText.some((choice) => choice.includes(question.answer)), true);
@@ -237,7 +272,9 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
     await gradePage.waitForTimeout(400);
     assert.equal(await gradePage.getByTestId("sing-input").count(), 1);
     assert.equal(await gradePage.getByTestId("feedback").count(), 0);
-    assert.equal(await gradePage.locator("#sing-field").evaluate((el) => el.className), "sing-field");
+    assert.match(await gradePage.locator("#sing-field").evaluate((el) => el.className), /is-wrong/);
+    assert.match(await gradePage.getByTestId("sing-miss").innerText(), /Not quite, try again/);
+    assert.equal(await gradePage.getByTestId("show-answer").count(), 0);
     await gradePage.evaluate(() => {
       document.addEventListener("submit", () => {
         window.__flash = document.getElementById("sing-field").className;
@@ -267,8 +304,8 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
     await plainPage.getByTestId("sing-input").waitFor();
     assert.equal(await plainPage.getByTestId("mic").count(), 0);
     assert.equal(await plainPage.locator(".error, .toast").count(), 0);
-    assert.match(await plainPage.getByTestId("question").innerText(), /Type the next line/);
-    assert.equal(await plainPage.getByTestId("cant-sing").count(), 1);
+    assert.match(await plainPage.getByTestId("question").innerText(), /type the next line/i);
+    assert.equal(await plainPage.getByTestId("cant-sing").count(), 0);
     await plain.close();
 
     const denied = await browser.newContext({
@@ -285,7 +322,7 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
     await deniedPage.getByTestId("mic").waitFor({ state: "detached" });
     assert.equal(await deniedPage.getByTestId("sing-input").count(), 1);
     assert.equal(await deniedPage.locator(".error, .toast").count(), 0);
-    assert.match(await deniedPage.getByTestId("question").innerText(), /Type the next line/);
+    assert.match(await deniedPage.getByTestId("question").innerText(), /type the next line/i);
     await deniedPage.getByTestId("sing-input").fill(heard);
     await deniedPage.keyboard.press("Enter");
     await deniedPage.getByTestId("feedback").waitFor();
@@ -296,3 +333,151 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
     await browser.close();
   }
 });
+
+test("webkit screenshots keep lyrics and controls distinct on iPhone and Mac", async (t) => {
+  if (!webkit) {
+    t.skip("playwright is not installed");
+    return;
+  }
+  let browser;
+  try {
+    browser = await webkit.launch();
+  } catch (error) {
+    t.skip(`webkit browser is not installed (${error.message})`);
+    return;
+  }
+  const shotPort = port + 4;
+  const server = startServerFor(shotPort);
+  const viewports = [
+    { name: "390x844", width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 },
+    { name: "1280x800", width: 1280, height: 800, isMobile: false, hasTouch: false, deviceScaleFactor: 1 }
+  ];
+  try {
+    await waitForPort(shotPort);
+    await mkdir(shots, { recursive: true });
+    for (const viewport of viewports) {
+      const context = await browser.newContext({
+        viewport: { width: viewport.width, height: viewport.height },
+        isMobile: viewport.isMobile,
+        hasTouch: viewport.hasTouch,
+        deviceScaleFactor: viewport.deviceScaleFactor
+      });
+      const page = await context.newPage();
+      await installRecognition(page);
+      const base = `http://127.0.0.1:${shotPort}`;
+      await page.goto(`${base}/#/play/sample-banana-flashlight/next?sing=1&seed=4`, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("sing-input").waitFor();
+      const gap = await page.evaluate(() => {
+        const lyric = document.querySelector("[data-testid=context-previous]").getBoundingClientRect();
+        const dock = document.querySelector("[data-testid=answer-dock]").getBoundingClientRect();
+        return dock.top - lyric.bottom;
+      });
+      assert.ok(gap >= 8 && gap < 180, `lyric to controls gap ${gap} on ${viewport.name}`);
+      await page.screenshot({ path: path.join(shots, `sing-idle-${viewport.name}.png`) });
+
+      await page.getByTestId("sing-input").fill("nope nope nope nope");
+      await page.getByTestId("check").click();
+      await page.getByTestId("sing-miss").waitFor();
+      await page.getByTestId("sing-input").fill("still nope nope nope");
+      await page.getByTestId("check").click();
+      await page.getByTestId("show-answer").waitFor();
+      assert.match(await page.getByTestId("sing-miss").innerText(), /Not quite, try again/);
+      const wrongBorder = await page.locator(".sing-row .sing-input").evaluate((el) => getComputedStyle(el).borderTopColor);
+      assert.equal(wrongBorder, "rgb(255, 77, 109)");
+      await page.screenshot({ path: path.join(shots, `sing-wrong-${viewport.name}.png`) });
+
+      const keyboard = await page.evaluate(() => {
+        const fake = {
+          height: 420,
+          offsetTop: 80,
+          width: window.innerWidth,
+          addEventListener() {},
+          removeEventListener() {}
+        };
+        try {
+          Object.defineProperty(window, "visualViewport", { configurable: true, get() { return fake; } });
+        } catch {
+          return { stubbed: false };
+        }
+        window.dispatchEvent(new Event("resize"));
+        const seen = window.visualViewport?.height;
+        const app = document.querySelector(".app.is-play").getBoundingClientRect();
+        const check = document.querySelector("[data-testid=check]").getBoundingClientRect();
+        return { stubbed: seen === 420, seen, appHeight: app.height, appTop: app.top, checkBottom: check.bottom, checkTop: check.top };
+      });
+      if (keyboard.stubbed) {
+        assert.ok(Math.abs(keyboard.appHeight - 420) < 2, `play height ${keyboard.appHeight}`);
+        assert.ok(Math.abs(keyboard.appTop - 80) < 2, `play offset ${keyboard.appTop}`);
+        assert.ok(keyboard.checkBottom <= keyboard.appTop + keyboard.appHeight + 1, "Check stays inside the visible viewport");
+        await page.evaluate(() => {
+          const fake = {
+            height: window.innerHeight,
+            offsetTop: 0,
+            width: window.innerWidth,
+            addEventListener() {},
+            removeEventListener() {}
+          };
+          Object.defineProperty(window, "visualViewport", { configurable: true, get() { return fake; } });
+          window.dispatchEvent(new Event("resize"));
+        });
+      }
+
+      await page.goto(`${base}/#/play/sample-banana-flashlight/next?seed=4`, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("play").waitFor();
+      if (await page.getByTestId("cant-sing").count()) await page.getByTestId("cant-sing").click();
+      await page.locator(".choice").first().waitFor();
+      const nextLook = await page.evaluate(() => {
+        const lyric = getComputedStyle(document.querySelector(".target-line"));
+        const label = getComputedStyle(document.querySelector(".q-label"));
+        return { lyric: lyric.fontSize, weight: lyric.fontWeight, label: label.fontSize, transform: label.textTransform };
+      });
+      assert.equal(nextLook.lyric, "22px");
+      assert.equal(nextLook.weight, "700");
+      assert.equal(nextLook.label, "12px");
+      assert.equal(nextLook.transform, "uppercase");
+      await page.screenshot({ path: path.join(shots, `next-line-${viewport.name}.png`) });
+
+      await page.goto(`${base}/#/play/sample-banana-flashlight/order`, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("check").waitFor();
+      const orderLook = await page.evaluate(() => {
+        const line = getComputedStyle(document.querySelector(".target-line"));
+        const label = [...document.querySelectorAll(".q-label")].map((el) => el.textContent).join(" ");
+        return { size: line.fontSize, weight: line.fontWeight, label };
+      });
+      assert.equal(orderLook.size, "22px");
+      assert.equal(orderLook.weight, "700");
+      assert.match(orderLook.label, /Put the words in order/);
+      await page.screenshot({ path: path.join(shots, `word-order-${viewport.name}.png`) });
+      await context.close();
+    }
+  } finally {
+    server.kill();
+    await browser.close();
+  }
+});
+
+function startServerFor(serverPort) {
+  return spawn("python3", ["-m", "http.server", String(serverPort), "--bind", "127.0.0.1"], {
+    cwd: root,
+    stdio: "ignore"
+  });
+}
+
+function waitForPort(serverPort) {
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      const socket = net.connect(serverPort, "127.0.0.1");
+      socket.on("connect", () => {
+        socket.end();
+        resolve();
+      });
+      socket.on("error", () => {
+        socket.destroy();
+        if (Date.now() - started > 4000) reject(new Error("preview server did not start"));
+        else setTimeout(attempt, 50);
+      });
+    };
+    attempt();
+  });
+}
