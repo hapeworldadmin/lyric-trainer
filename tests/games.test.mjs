@@ -21,7 +21,8 @@ import {
   secondsForLine,
   sectionBlocks,
   sectionProgress,
-  seededRng
+  seededRng,
+  singingMatch
 } from "../js/games.js";
 import { SAMPLE_SONG } from "../js/sample.js";
 
@@ -316,4 +317,54 @@ test("mastered rounds are skipped and the final run still covers them", () => {
   const covered = buildLesson(singles, "concert", seededRng(1), singleLabels);
   assert.equal(covered.some((question) => question.kind === "sections"), false);
   assert.equal(covered.reduce((sum, question) => sum + (question.span || 1), 0), singles.length);
+});
+
+test("sung answers ignore case and punctuation and accept most words in order", () => {
+  const line = "One two three four five six seven";
+  assert.equal(singingMatch(line, "ONE two, three four five six seven!"), true);
+  assert.equal(singingMatch(line, "two three four five six seven"), true);
+  assert.equal(singingMatch(line, "one two three four five"), true);
+  assert.equal(singingMatch(line, "one two three four"), false);
+  assert.equal(singingMatch(line, "seven six five four three two one"), false);
+  assert.equal(singingMatch(line, ""), false);
+  assert.equal(singingMatch("one two three four five six seven eight nine ten", "one two three four five six seven extra words"), true);
+  assert.equal(gradeAnswer({ kind: "next", sing: true, answer: line }, "two three four five six seven"), true);
+  assert.equal(gradeAnswer({ kind: "next", sing: true, answer: line }, "nope"), false);
+  assert.equal(gradeAnswer({ kind: "next", answer: line }, "two three four five six seven"), false);
+});
+
+test("about one in three next-line questions can be sung, and the final run has a couple", () => {
+  const lines = Array.from({ length: 12 }, (_, index) => `lantern line number ${index} stays`);
+  const sections = lines.map((_, index) => (index < 4 ? "Verse" : index < 8 ? "Chorus" : "Bridge"));
+  for (let seed = 1; seed <= 6; seed += 1) {
+    const lesson = buildLesson(lines, "next", seededRng(seed), sections);
+    const nextQuestions = lesson.filter((question) => question.kind === "next");
+    const sing = nextQuestions.filter((question) => question.sing);
+    assert.equal(sing.length, Math.round(nextQuestions.length / 3));
+    assert.ok(nextQuestions.some((question) => !question.sing));
+    for (const question of sing) {
+      assert.equal(question.context.next, "");
+      assert.equal(question.choices.includes(question.answer), true);
+      assert.equal(exposedText(question).split("\n").includes(question.answer), false);
+    }
+    const concert = buildLesson(lines, "concert", seededRng(seed), sections);
+    const concertNext = concert.filter((question) => question.kind === "next");
+    const concertSing = concertNext.filter((question) => question.sing);
+    assert.equal(concertSing.length, Math.min(2, concertNext.length));
+    if (concertNext.length > 2) assert.ok(concertNext.some((question) => !question.sing));
+    for (const question of concertSing) {
+      assert.equal(question.context.next || "", "");
+      assert.equal(exposedText(question).split("\n").includes(question.answer), false);
+    }
+  }
+  const sampleNext = buildLesson(SAMPLE_SONG.lines, "next", seededRng(4), SAMPLE_SONG.sections);
+  const sampleSing = sampleNext.filter((question) => question.kind === "next" && question.sing);
+  assert.equal(sampleSing.length, Math.round(sampleNext.filter((question) => question.kind === "next").length / 3));
+  const forced = buildLesson(SAMPLE_SONG.lines, "next", seededRng(4), SAMPLE_SONG.sections, { forceSing: true });
+  assert.equal(forced[0].sing, true);
+  assert.equal(forced.filter((question) => question.sing).length, sampleSing.length);
+  for (const gameId of ["lines", "fill", "order", "letters"]) {
+    const lesson = buildLesson(SAMPLE_SONG.lines, gameId, seededRng(4), SAMPLE_SONG.sections);
+    assert.equal(lesson.some((question) => question.sing), false);
+  }
 });

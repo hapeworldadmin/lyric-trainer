@@ -36,6 +36,7 @@ export function secondsForLine(line) {
 
 export function questionSeconds(question) {
   if (!question) return 5;
+  if (question.sing) return secondsForLine(question.answer || question.line || "");
   if (question.kind === "lines" || question.kind === "order") {
     const text = question.kind === "order"
       ? (question.line || "")
@@ -111,6 +112,25 @@ export function answersMatch(expected, given) {
   return normalizeAnswer(expected) === normalizeAnswer(given);
 }
 
+// Sung answers are rough transcripts. Caps and punctuation are ignored, and
+// the line counts when most of its words show up in order.
+const SING_WORD_MATCH = 0.7;
+
+export function singingMatch(expected, given) {
+  const answer = normalizeAnswer(expected).split(" ").filter(Boolean);
+  const heard = normalizeAnswer(given).split(" ").filter(Boolean);
+  if (!answer.length || !heard.length) return false;
+  let cursor = 0;
+  let matched = 0;
+  for (const word of heard) {
+    const at = answer.indexOf(word, cursor);
+    if (at < 0) continue;
+    matched += 1;
+    cursor = at + 1;
+  }
+  return matched / answer.length >= SING_WORD_MATCH;
+}
+
 export function pointsFor({ kind, correct, combo, secondsLeft }) {
   if (!correct) return { xp: 0, score: 0 };
   const base = { fill: 10, next: 10, order: 12, letters: 15, lines: 14, previous: 10, swap: 12, intruder: 12, which: 10, truth: 10 }[kind] || 10;
@@ -163,6 +183,7 @@ export function gradeAnswer(question, given) {
   if (question.kind === "order" || question.kind === "lines") {
     return isOrderCorrect(question, given);
   }
+  if (question.sing) return singingMatch(question.answer || question.line, given);
   return answersMatch(question.answer, given);
 }
 
@@ -431,12 +452,34 @@ function keepRounds(questions, options) {
   return kept;
 }
 
+function markSing(questions, rng, count, force) {
+  const slots = [];
+  questions.forEach((question, index) => {
+    if (question?.kind === "next") slots.push(index);
+  });
+  const total = Math.min(Math.max(0, count), slots.length);
+  const picked = new Set(shuffle(slots, rng).slice(0, total));
+  if (force && slots.length && !picked.has(slots[0])) {
+    if (picked.size) picked.delete([...picked][0]);
+    picked.add(slots[0]);
+  }
+  if (!picked.size) return questions;
+  return questions.map((question, index) => (picked.has(index) ? { ...question, sing: true } : question));
+}
+
 export function buildLesson(lines, gameId, rng = Math.random, sections = [], options = {}) {
   const list = [...(lines || [])];
   const labels = sections || [];
   if (gameId === "lines") return keepRounds(lineLesson(list, labels, rng, Number.isInteger(options.chunk) ? options.chunk : null), options);
-  if (gameId === "next") return keepRounds(nextLesson(list, labels, rng), options);
-  if (gameId === "concert") return finalRun(list, labels, rng);
+  if (gameId === "next") {
+    const lesson = keepRounds(nextLesson(list, labels, rng), options);
+    const nextCount = lesson.filter((question) => question.kind === "next").length;
+    return markSing(lesson, rng, Math.round(nextCount / 3), options.forceSing);
+  }
+  if (gameId === "concert") {
+    const lesson = finalRun(list, labels, rng);
+    return markSing(lesson, rng, 2, options.forceSing);
+  }
   const eligible = list.map((_, index) => index).filter((index) => canAsk(list, index, gameId));
   const count = Math.min(LESSON_LENGTH, eligible.length);
   return stampRounds(shuffle(eligible, rng).slice(0, count).map((index) => withContext(makeQuestion(list, index, gameId, rng), list, labels)).filter(Boolean));

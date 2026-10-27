@@ -478,6 +478,8 @@ test("webkit lesson dock, hero contrast, and answer type hold on iPhone and Mac"
       assert.ok(tall.vh - tall.check.bottom <= 24);
 
       await page.goto(`${base}/#/play/sample-banana-flashlight/next`, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("play").waitFor();
+      if (await page.getByTestId("cant-sing").count()) await page.getByTestId("cant-sing").click();
       await page.locator(".choice").first().waitFor();
       const next = await page.evaluate(lessonDockMetrics);
       assert.equal(next.overlaps, false);
@@ -494,7 +496,7 @@ test("webkit lesson dock, hero contrast, and answer type hold on iPhone and Mac"
       assert.equal(after.overlaps, false);
       assert.ok(after.vh - after.check.bottom >= 12 && after.vh - after.check.bottom <= 24);
       await page.keyboard.press("Enter");
-      await page.locator(".choice, [data-testid=final-score]").first().waitFor();
+      await page.locator(".choice, [data-testid=final-score], [data-testid=sing-input]").first().waitFor();
       await context.close();
     }
   } finally {
