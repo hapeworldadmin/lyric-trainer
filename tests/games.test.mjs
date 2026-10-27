@@ -32,9 +32,9 @@ test("every game can be built from the sample song", () => {
   assert.equal(availability.next, true);
   assert.equal(availability.letters, true);
   assert.equal(availability.concert, true);
-  assert.equal(availability.sections, true);
   assert.equal(availability.lines, true);
-  assert.equal(firstLessonId(SAMPLE_SONG.lines, SAMPLE_SONG.sections), "sections");
+  assert.equal(firstLessonId(SAMPLE_SONG.lines, SAMPLE_SONG.sections), "lines");
+  assert.equal(Object.hasOwn(availability, "sections"), false);
   for (const gameId of ["fill", "order", "letters"]) {
     const lesson = buildLesson(SAMPLE_SONG.lines, gameId, seededRng(7));
     assert.ok(lesson.length >= 1 && lesson.length <= 6);
@@ -128,22 +128,12 @@ test("context lines cover neighbors, section labels, and the ends of a song", ()
   assert.notEqual(next.context.previous, next.answer);
 });
 
-test("section order and line order check ids, and repeated sections stay distinct", () => {
+test("line order checks ids, and repeated sections stay distinct", () => {
   const lines = ["alpha one two", "beta three four", "gamma five six", "delta seven eight"];
   const sections = ["Chorus", "Verse", "Chorus", "Chorus"];
   const blocks = sectionBlocks(lines, sections);
   assert.deepEqual(blocks.map((block) => block.label), ["Chorus", "Verse", "Chorus 2"]);
   assert.deepEqual(blocks.map((block) => block.lines.length), [1, 1, 2]);
-
-  const [sectionsQuestion] = buildLesson(lines, "sections", seededRng(1), sections);
-  assert.equal(sectionsQuestion.kind, "sections");
-  assert.equal(isOrderCorrect(sectionsQuestion, sectionsQuestion.tokens.map((token) => token.id)), true);
-  assert.equal(isOrderCorrect(sectionsQuestion, [...sectionsQuestion.tokens].reverse().map((token) => token.id)), false);
-  assert.equal(sectionsQuestion.tokens[0].text, lines[0]);
-  assert.equal(sectionsQuestion.tokens[0].label, "Chorus");
-  assert.equal(sectionsQuestion.context.rangeLabel, "3 sections");
-  assert.equal(sectionsQuestion.context.previous, "");
-  assert.equal(sectionsQuestion.context.next, "");
 
   const [lineQuestion] = buildLesson(lines, "lines", seededRng(2), sections);
   assert.equal(lineQuestion.kind, "lines");
@@ -153,11 +143,10 @@ test("section order and line order check ids, and repeated sections stay distinc
   assert.match(lineQuestion.context.rangeLabel, /lines 3–4 of 4/);
   assert.equal(lineQuestion.context.previous, lines[1]);
   assert.equal(lineQuestion.context.next, "");
-  assert.equal(gameAvailability(lines.slice(0, 2), ["Verse", "Verse"]).sections, false);
   assert.equal(gameAvailability(lines.slice(0, 2), ["Verse", "Verse"]).lines, true);
 });
 
-test("line order slides in short windows and section order caps each round", () => {
+test("line order slides in short windows", () => {
   const lines = Array.from({ length: 33 }, (_, index) => `lantern line number ${index} here`);
   const flat = lines.map(() => "Part 1");
   const lineLesson = buildLesson(lines, "lines", seededRng(1), flat);
@@ -175,16 +164,6 @@ test("line order slides in short windows and section order caps each round", () 
   assert.ok(longSection.every((question) => question.tokens.length <= 6));
   assert.equal(longSection[0].tokens.length, 5);
   assert.equal(longSection.reduce((sum, question) => sum + question.tokens.length, 0), 33);
-
-  const sectionLesson = buildLesson(lines, "sections", seededRng(3), flat).filter((question) => question.kind === "sections");
-  assert.ok(sectionLesson.length >= 2);
-  assert.ok(sectionLesson.every((question) => question.tokens.length <= 6 && question.tokens.length >= 2));
-  const eight = ["aa one", "bb two", "cc three", "dd four", "ee five", "ff six", "gg seven", "hh eight"];
-  const labels = ["North", "East", "South", "West", "Up", "Down", "Near", "Far"];
-  const rounds = buildLesson(eight, "sections", seededRng(4), labels).filter((question) => question.kind === "sections");
-  assert.equal(rounds.length, 2);
-  assert.ok(rounds.every((question) => question.tokens.length <= 6));
-  assert.equal(rounds.reduce((sum, question) => sum + question.tokens.length, 0), 8);
 });
 
 test("identical lines are interchangeable one tap at a time", () => {
@@ -274,7 +253,7 @@ test("question types do not repeat more than twice in a row", () => {
   }
   const lines = ["alpha one two", "beta three four", "gamma five six", "delta seven eight", "epsilon nine ten", "zeta eleven twelve"];
   const sections = ["Verse", "Verse", "Chorus", "Chorus", "Bridge", "Bridge"];
-  for (const gameId of ["sections", "lines", "next", "concert"]) {
+  for (const gameId of ["lines", "next", "concert"]) {
     const lesson = buildLesson(lines, gameId, seededRng(4), sections);
     const kinds = lesson.map((question) => question.kind);
     for (let index = 2; index < kinds.length; index += 1) {
@@ -313,7 +292,28 @@ test("mastered rounds are skipped and the final run still covers them", () => {
   const progress = sectionProgress(lines, sections, rounds);
   assert.equal(progress[0].mastered, full[0].tokens.length);
   const plan = chapterPlan(lines, sections, {});
+  assert.deepEqual(plan.map((chapter) => chapter.id), ["lines", "next", "concert"]);
+  assert.equal(plan[0].name, "Build");
   assert.equal(plan[0].status, "open");
   assert.equal(plan[1].status, "locked");
-  assert.equal(chapterPlan(lines, sections, { sections: true })[1].status, "open");
+  assert.equal(plan[2].status, "locked");
+  assert.equal(chapterPlan(lines, sections, { lines: true })[1].status, "open");
+  assert.equal(chapterPlan(lines, sections, { sections: true })[0].status, "open");
+  assert.equal(chapterPlan(lines, sections, { sections: true })[0].id, "lines");
+  const fresh = nextPractice(lines, sections, {});
+  assert.equal(fresh.gameId, "lines");
+  assert.ok(fresh.roundId);
+  for (const gameId of ["lines", "next", "concert"]) {
+    const lesson = buildLesson(lines, gameId, seededRng(5), sections);
+    assert.ok(lesson.length > 0, gameId);
+    assert.equal(lesson.some((question) => question.kind === "sections"), false, gameId);
+  }
+  const singles = ["alpha one two", "beta three four", "gamma five six"];
+  const singleLabels = ["Verse", "Chorus", "Bridge"];
+  assert.equal(gameAvailability(singles, singleLabels).lines, false);
+  assert.equal(firstLessonId(singles, singleLabels), "next");
+  assert.ok(buildLesson(singles, "next", seededRng(1), singleLabels).length > 0);
+  const covered = buildLesson(singles, "concert", seededRng(1), singleLabels);
+  assert.equal(covered.some((question) => question.kind === "sections"), false);
+  assert.equal(covered.reduce((sum, question) => sum + (question.span || 1), 0), singles.length);
 });

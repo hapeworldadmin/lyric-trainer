@@ -292,6 +292,91 @@ test("webkit word order accepts number keys and Enter, and ignores keys in a fie
   }
 });
 
+test("webkit first lesson is line order, not section order, on iPhone and Mac", async (t) => {
+  if (!webkit) {
+    t.skip("playwright is not installed");
+    return;
+  }
+  let browser;
+  try {
+    browser = await webkit.launch();
+  } catch (error) {
+    t.skip(`webkit browser is not installed (${error.message})`);
+    return;
+  }
+  const flowPort = port + 3;
+  const server = spawn("python3", ["-m", "http.server", String(flowPort), "--bind", "127.0.0.1"], {
+    cwd: root,
+    stdio: "ignore"
+  });
+  const wait = () => new Promise((resolve, reject) => {
+    const started = Date.now();
+    const attempt = () => {
+      const socket = net.connect(flowPort, "127.0.0.1");
+      socket.on("connect", () => {
+        socket.end();
+        resolve();
+      });
+      socket.on("error", () => {
+        socket.destroy();
+        if (Date.now() - started > 2000) reject(new Error("preview server did not start"));
+        else setTimeout(attempt, 50);
+      });
+    };
+    attempt();
+  });
+  try {
+    await wait();
+    const viewports = [
+      { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 },
+      { width: 1280, height: 800, isMobile: false, hasTouch: false, deviceScaleFactor: 1 }
+    ];
+    for (const viewport of viewports) {
+      const context = await browser.newContext({
+        viewport: { width: viewport.width, height: viewport.height },
+        isMobile: viewport.isMobile,
+        hasTouch: viewport.hasTouch,
+        deviceScaleFactor: viewport.deviceScaleFactor
+      });
+      const page = await context.newPage();
+      const base = `http://127.0.0.1:${flowPort}`;
+      await page.goto(`${base}/#/song/sample-banana-flashlight`, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("game-lines").waitFor();
+      const songText = await page.locator("body").innerText();
+      assert.equal(songText.includes("Flow"), false);
+      assert.equal(songText.includes("Tap the opening lines"), false);
+      assert.match(await page.getByTestId("chapter-progress").innerText(), /0 of 3 chapters/);
+      assert.match(await page.getByTestId("game-lines").innerText(), /Build/);
+      assert.equal(await page.getByTestId("game-sections").count(), 0);
+
+      await page.getByTestId("game-lines").click();
+      await page.getByTestId("play").waitFor();
+      const ask = await page.getByTestId("question").innerText();
+      assert.match(ask, /Tap the lines in order/);
+      assert.equal(ask.includes("opening lines"), false);
+      assert.equal(await page.getByText("The order appears here").count(), 0);
+      assert.doesNotMatch(await page.locator(".play-crumb").innerText(), /Flow/);
+      const tapped = await page.locator(".pool .token").first().evaluate((el) => {
+        el.click();
+        return el.className;
+      });
+      assert.match(tapped, /is-accept|is-reject/);
+
+      await page.goto(`${base}/#/play/sample-banana-flashlight/concert`, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("play").waitFor();
+      const finalText = await page.locator("body").innerText();
+      assert.equal(finalText.includes("Tap the opening lines"), false);
+      assert.equal(finalText.includes("The order appears here"), false);
+      assert.equal(finalText.includes("Flow"), false);
+      assert.equal(await page.getByTestId("question").count(), 1);
+      await context.close();
+    }
+  } finally {
+    server.kill();
+    await browser.close();
+  }
+});
+
 test("webkit lesson dock, hero contrast, and answer type hold on iPhone and Mac", async (t) => {
   if (!webkit) {
     t.skip("playwright is not installed");

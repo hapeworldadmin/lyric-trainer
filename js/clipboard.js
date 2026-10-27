@@ -1,4 +1,4 @@
-import { choosePasteSource } from "./parse.js?v=7";
+import { choosePasteSource } from "./parse.js?v=9";
 
 // Safari shows its Paste bubble only when the read starts in the click turn.
 // Call readText() and read() before this function awaits.

@@ -1,6 +1,6 @@
-import { blip } from "./audio.js?v=7";
-import { readClipboardFromGesture } from "./clipboard.js?v=7";
-import { activeConcertSummary, concertStatusLine, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=7";
+import { blip } from "./audio.js?v=9";
+import { readClipboardFromGesture } from "./clipboard.js?v=9";
+import { activeConcertSummary, concertStatusLine, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=9";
 import {
   GAMES,
   answersMatch,
@@ -16,8 +16,8 @@ import {
   pointsFor,
   questionSeconds,
   sectionProgress
-} from "./games.js?v=7";
-import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=7";
+} from "./games.js?v=9";
+import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=9";
 import {
   addBonusXp,
   buildExport,
@@ -32,10 +32,10 @@ import {
   resetLineMasteryIfChanged,
   retitleSongProgress,
   songStats
-} from "./progress.js?v=7";
-import { SAMPLE_SONG } from "./sample.js?v=7";
-import { createScoreProvider, sanitizeRun } from "./scores.js?v=7";
-import { drawShareCard, shareText } from "./share.js?v=7";
+} from "./progress.js?v=9";
+import { SAMPLE_SONG } from "./sample.js?v=9";
+import { createScoreProvider, sanitizeRun } from "./scores.js?v=9";
+import { drawShareCard, shareText } from "./share.js?v=9";
 import {
   activePlayer,
   activeProgress as progressOf,
@@ -44,8 +44,8 @@ import {
   sampleRecord,
   saveState,
   seedSample
-} from "./storage.js?v=7";
-import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=7";
+} from "./storage.js?v=9";
+import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=9";
 
 const session = {
   state: null,
@@ -603,7 +603,7 @@ function playCrumb(play, question) {
 function contextHtml(question) {
   const context = question?.context;
   if (!context) return { before: "", after: "" };
-  const showPrevious = context.previous && question.kind !== "next" && question.kind !== "sections" && !question.hidesPrevious;
+  const showPrevious = context.previous && question.kind !== "next" && !question.hidesPrevious;
   const previous = showPrevious ? `<p class="context-line is-anchor" data-testid="context-previous">${escapeHtml(context.previous)}</p>` : "";
   const allowNext = session.play?.gameId === "lines" && question.kind === "lines";
   const next = allowNext && context.next
@@ -637,7 +637,6 @@ function questionHtml(question) {
   }
   if (question.kind === "intruder") return `<p class="ask" data-testid="question">Which line does not belong?</p>`;
   if (question.kind === "swap") return `<p class="ask" data-testid="question">Tap the word that does not belong</p>`;
-  if (question.kind === "sections") return `<p class="ask" data-testid="question">Tap the opening lines in order</p>`;
   if (question.kind === "lines") return `<p class="ask" data-testid="question">Tap the lines in order</p>`;
   return `<p class="ask" data-testid="question">Tap the words in order</p>`;
 }
@@ -676,19 +675,18 @@ function answerParts(question) {
       `).join("")}</div>`
     };
   }
-  if (question.kind === "order" || question.kind === "lines" || question.kind === "sections") {
+  if (question.kind === "order" || question.kind === "lines") {
     const order = ensureOrder();
     const stacked = question.kind === "order" ? "" : " is-stacked";
     const byId = new Map(question.tokens.map((token) => [token.id, token]));
     const placed = order.arranged.map((id) => {
       const token = byId.get(id);
-      const tag = question.kind === "sections" && token?.label ? `<span class="token-tag">${escapeHtml(token.label)}</span>` : "";
-      return `<span class="token is-set${order.justPlaced === id ? " is-placed" : ""}">${escapeHtml(token?.text || "")}${tag}</span>`;
+      return `<span class="token is-set${order.justPlaced === id ? " is-placed" : ""}">${escapeHtml(token?.text || "")}</span>`;
     }).join("");
     const pool = order.pool.map((id, index) => `
       <button class="token" type="button" data-action="pick-token" data-option="${index}" data-token="${escapeHtml(id)}">${keyHint(index)}${escapeHtml(byId.get(id)?.text || "")}</button>
     `).join("");
-    const empty = question.kind === "sections" ? "The order appears here" : "Your line appears here";
+    const empty = "Your line appears here";
     return {
       tray: `<div class="tray${stacked}" data-testid="tray">${placed || `<span class="hint">${empty}</span>`}</div>`,
       chips: `<div class="pool${stacked}">${pool}</div>`
@@ -1332,7 +1330,7 @@ function submitCurrent(forced = null) {
     play.picked = forced?.choice ?? play.picked;
     if (!play.picked) return;
     correct = answersMatch(question.answer, play.picked);
-  } else if (question.kind === "order" || question.kind === "lines" || question.kind === "sections") {
+  } else if (question.kind === "order" || question.kind === "lines") {
     if (forced?.orderFailed) {
       correct = false;
     } else {

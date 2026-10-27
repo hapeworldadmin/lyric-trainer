@@ -1,6 +1,6 @@
 # Know the Verse
 
-Know the Verse is a small, mobile-friendly game for memorizing song lyrics **you paste yourself**. Lessons follow the song: section order, line order, next line, then a timed final run.
+Know the Verse is a small, mobile-friendly game for memorizing song lyrics **you paste yourself**. Lessons follow the song: line order, next line, then a timed final run.
 
 It is a static site. There is no account and no server. Lyrics stay in your browser.
 
@@ -21,16 +21,15 @@ The only song included with the app is an original placeholder, **Banana Flashli
 
 The main path follows the song:
 
-- **Section order** — arrange Verse, Chorus, Bridge, and the rest, about six parts at a time. Blank lines become parts when the paste has no section labels. A paste with no breaks is split into short parts, and a repeated block is labeled Chorus.
 - **Line order** — put a few lines back in order (about four or five at a time). The line above the group stays visible as a dimmed anchor.
 - **Next line** — choose the line that comes next.
 - **Final run** — a timed pass through the whole song.
 
 **Tricky lines** is a short warm-up: fill the blank, word order, and first letters.
 
-Fill the blank, word order, first letters, and next line show the previous line above the question and the next line below it, in a quieter style. The first line has no previous line, and the last line has no next line. When a section label was in the paste, the question also shows it and the position, such as `Chorus · line 12 of 40`. Section order does not show the parts you are arranging. Line order shows only the line above the group, not the lines in the shuffle.
+Fill the blank, word order, first letters, and next line show the previous line above the question and the next line below it, in a quieter style. The first line has no previous line, and the last line has no next line. When a section label was in the paste, the question also shows it and the position, such as `Chorus · line 12 of 40`. Line order shows only the line above the group, not the lines in the shuffle.
 
-Line order, section order, and word order check each tap immediately. An identical line can stand in for another with the same words. A wrong tap flashes and costs a heart, and the right one moves into the answer.
+Line order and word order check each tap immediately. An identical line can stand in for another with the same words. A wrong tap flashes and costs a heart, and the right one moves into the answer.
 
 ### Players, scores, and backup
 

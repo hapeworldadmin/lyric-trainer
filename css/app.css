@@ -478,13 +478,6 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
   vertical-align: baseline;
 }
 .target-blank:empty { height: 0.85em; }
-.token-tag {
-  display: block;
-  margin-top: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--muted);
-}
 .key-hint { display: none; }
 @media (hover: hover) and (pointer: fine) {
   .key-hint {
