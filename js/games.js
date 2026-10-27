@@ -2,6 +2,8 @@ import { inferSections } from "./parse.js?v=9";
 import { contentKey, displayToken, mulberry32, normalizeAnswer, normalizeSing, shuffle, tokenize, wordCount } from "./text.js?v=11";
 
 export const GAMES = [
+  { id: "fade", name: "Fade", detail: "Read the line, then hide more words", group: "main" },
+  { id: "think", name: "Think", detail: "Recall the next line, then check", group: "main" },
   { id: "lines", name: "Build", detail: "Line order in short rounds", group: "main" },
   { id: "next", name: "Next line", detail: "Recall what comes next", group: "main" },
   { id: "concert", name: "Final run", detail: "Timed run through the song", group: "main" },
@@ -11,6 +13,8 @@ export const GAMES = [
 ];
 
 export const CHAPTERS = [
+  { id: "fade", name: "Fade", detail: "Read the line, then hide more words" },
+  { id: "think", name: "Think", detail: "Recall the next line, then check" },
   { id: "lines", name: "Build", detail: "Line order in short rounds" },
   { id: "next", name: "Next line", detail: "Recall what comes next" },
   { id: "concert", name: "Final run", detail: "Timed run through the song" }
@@ -86,13 +90,15 @@ export function gameAvailability(lines, sections = []) {
     next: list.length >= 3,
     letters: list.some((line) => tokenize(line).length >= 1),
     concert: list.length >= 1 && list.some((line) => tokenize(line).length >= 1),
-    lines: blocks.some((block) => block.lines.length >= 2)
+    lines: blocks.some((block) => block.lines.length >= 2),
+    fade: list.some((line) => tokenize(line).length >= 1),
+    think: list.some((line) => tokenize(line).length >= 1)
   };
 }
 
 export function firstLessonId(lines, sections = []) {
   const availability = gameAvailability(lines, sections);
-  for (const id of ["lines", "next", "fill", "letters", "order"]) {
+  for (const id of ["fade", "think", "lines", "next", "fill", "letters", "order"]) {
     if (availability[id]) return id;
   }
   return "letters";
@@ -132,7 +138,7 @@ export function singingMatch(expected, given) {
 
 export function pointsFor({ kind, correct, combo, secondsLeft }) {
   if (!correct) return { xp: 0, score: 0 };
-  const base = { fill: 10, next: 10, order: 12, letters: 15, lines: 14, previous: 10, intruder: 12, which: 10, truth: 10 }[kind] || 10;
+  const base = { fill: 10, next: 10, order: 12, letters: 15, lines: 14, fade: 12, think: 12, previous: 10, intruder: 12, which: 10, truth: 10 }[kind] || 10;
   const xp = base + Math.min(10, Math.max(0, combo - 1) * 2);
   let score = 100 + combo * 10;
   if (typeof secondsLeft === "number") score += Math.max(0, Math.round(secondsLeft * 8));
@@ -170,6 +176,9 @@ export function correctLine(question) {
   if (question.kind === "lines") {
     return (question.tokens || []).map((token) => token.text).join("\n");
   }
+  if (question.kind === "fade" || question.kind === "think") {
+    return (question.steps || []).map((step) => step.text).join("\n");
+  }
   return question.line || question.answer || "";
 }
 
@@ -200,10 +209,10 @@ function shuffleTokens(tokens, rng) {
 
 export function lineWindowSizes(total) {
   if (total < 2) return [];
-  if (total <= 5) return [total];
-  let parts = Math.ceil(total / 5);
+  if (total <= 6) return [total];
+  let parts = Math.ceil(total / 6);
   while (parts > 1 && total / parts < 3) parts -= 1;
-  while (Math.ceil(total / parts) > 5) parts += 1;
+  while (Math.ceil(total / parts) > 6) parts += 1;
   const base = Math.floor(total / parts);
   let extra = total % parts;
   const sizes = [];
@@ -221,11 +230,213 @@ function stampRounds(questions) {
   const seen = new Map();
   return questions.filter(Boolean).map((question) => {
     const parts = question.roundLines || [question.line || question.prompt || question.answer || ""];
-    const base = contentKey(parts);
+    const prefix = question.roundPrefix || "";
+    const base = `${prefix}${contentKey(parts)}`;
     const count = (seen.get(base) || 0) + 1;
     seen.set(base, count);
-    return { ...question, roundId: count === 1 ? base : `${base}-${count}` };
+    const roundId = count === 1 ? base : `${base}-${count}`;
+    const { roundPrefix, ...rest } = question;
+    return { ...rest, roundId };
   });
+}
+
+export const FADE_PASSES = ["full", "some", "mostly", "none"];
+
+const FADE_PASS_LABELS = {
+  full: "All words",
+  some: "Some words hidden",
+  mostly: "Most words hidden",
+  none: "All words hidden"
+};
+
+export function fadePassLabel(pass) {
+  return FADE_PASS_LABELS[pass] || FADE_PASS_LABELS.full;
+}
+
+export function hiddenWordIndexes(count, pass) {
+  const total = Math.max(0, count | 0);
+  if (!total || pass === "full") return [];
+  if (pass === "none") return Array.from({ length: total }, (_, index) => index);
+  if (pass === "some") {
+    const hidden = [];
+    for (let index = 2; index < total; index += 3) hidden.push(index);
+    if (!hidden.length && total > 1) hidden.push(total - 1);
+    if (hidden.length >= total && hidden.length) hidden.pop();
+    return hidden;
+  }
+  if (total === 1) return [0];
+  return Array.from({ length: total - 1 }, (_, index) => index + 1);
+}
+
+export function fadeView(line, pass, revealed = 0) {
+  const words = tokenize(line).map((token) => displayToken(token));
+  const hidden = hiddenWordIndexes(words.length, pass);
+  const pending = new Set(hidden.slice(Math.max(0, revealed)));
+  return {
+    words,
+    hidden,
+    shown: words.map((word, index) => (pending.has(index) ? "" : word)),
+    done: pending.size === 0
+  };
+}
+
+function studyWindows(count) {
+  if (count <= 0) return [];
+  if (count === 1) return [1];
+  return lineWindowSizes(count);
+}
+
+function makeStudyRound(kind, lines, block, start, end) {
+  const steps = [];
+  for (let index = start; index < end; index += 1) {
+    const text = lines[index];
+    if (!tokenize(text).length) continue;
+    steps.push({
+      id: index,
+      text,
+      previous: index > 0 ? lines[index - 1] : ""
+    });
+  }
+  if (!steps.length) return null;
+  return {
+    kind,
+    lineIndex: start,
+    line: steps[0].text,
+    span: end - start,
+    steps,
+    roundPrefix: kind === "fade" ? "fade-" : "think-",
+    roundLines: steps.map((step) => step.text),
+    context: {
+      section: block.label,
+      position: start + 1,
+      total: lines.length,
+      previous: start > 0 ? lines[start - 1] : "",
+      next: "",
+      rangeLabel: `${block.label} · lines ${start + 1}–${end} of ${lines.length}`
+    }
+  };
+}
+
+function studyLesson(lines, sections, kind) {
+  const questions = [];
+  for (const block of sectionBlocks(lines, sections)) {
+    let offset = 0;
+    for (const size of studyWindows(block.lines.length)) {
+      const start = block.start + offset;
+      const question = makeStudyRound(kind, lines, block, start, start + size);
+      if (question) questions.push(question);
+      offset += size;
+    }
+  }
+  return stampRounds(questions);
+}
+
+export function studyFrame(question, state = {}) {
+  if (!question) return null;
+  if (question.kind === "fade") {
+    const steps = question.steps || [];
+    const passIndex = Math.max(0, Math.min(FADE_PASSES.length - 1, state.pass || 0));
+    const line = Math.max(0, Math.min(Math.max(steps.length - 1, 0), state.line || 0));
+    const step = steps[line];
+    if (!step) return null;
+    const view = fadeView(step.text, FADE_PASSES[passIndex], state.revealed || 0);
+    return {
+      kind: "fade",
+      previous: step.previous || "",
+      words: view.shown,
+      pass: FADE_PASSES[passIndex],
+      passIndex,
+      line,
+      lineCount: steps.length,
+      done: view.done,
+      action: view.done ? "Next" : "Reveal",
+      prompt: view.done ? "Read this line" : "Tap to reveal",
+      future: steps.slice(line + 1).map((item) => item.text)
+    };
+  }
+  if (question.kind === "think") {
+    const queue = state.queue || [];
+    const current = queue[0];
+    if (!current) return null;
+    const phase = state.phase === "rate" ? "rate" : "think";
+    return {
+      kind: "think",
+      previous: current.previous || "",
+      target: phase === "rate" ? current.text : "",
+      words: [],
+      phase,
+      prompt: phase === "rate"
+        ? "Did you have it?"
+        : (current.previous ? "Recall the next line" : "Recall this line"),
+      action: phase === "rate" ? "Got it" : "Show",
+      future: queue.slice(1).map((item) => item.text),
+      currentId: current.id
+    };
+  }
+  return null;
+}
+
+export function advanceFade(question, state = {}) {
+  const frame = studyFrame(question, state);
+  if (!frame) return { pass: 0, line: 0, revealed: 0, finished: true };
+  if (!frame.done) {
+    return {
+      pass: frame.passIndex,
+      line: frame.line,
+      revealed: (state.revealed || 0) + 1,
+      finished: false
+    };
+  }
+  let line = frame.line + 1;
+  let pass = frame.passIndex;
+  if (line >= (question.steps || []).length) {
+    line = 0;
+    pass += 1;
+  }
+  if (pass >= FADE_PASSES.length) {
+    return { pass: frame.passIndex, line: frame.line, revealed: state.revealed || 0, finished: true };
+  }
+  return { pass, line, revealed: 0, finished: false };
+}
+
+export function initialThink(question) {
+  return {
+    phase: "think",
+    queue: (question?.steps || []).map((step) => ({ ...step, tries: 0 })),
+    got: [],
+    misses: 0,
+    finished: false
+  };
+}
+
+export function rateThink(queue, gotIt) {
+  if (!queue?.length) return { queue: [], missed: false, dropped: false, done: true };
+  const [current, ...rest] = queue;
+  if (gotIt) return { queue: rest, missed: false, dropped: false, done: rest.length === 0 };
+  const tries = (current.tries || 0) + 1;
+  if (tries >= 2) return { queue: rest, missed: true, dropped: true, done: rest.length === 0 };
+  return {
+    queue: [...rest, { ...current, tries }],
+    missed: true,
+    dropped: false,
+    done: false
+  };
+}
+
+export function applyThink(state, gotIt) {
+  const queue = state?.queue || [];
+  const current = queue[0];
+  if (!current) {
+    return { phase: "think", queue: [], got: [...(state?.got || [])], misses: state?.misses || 0, finished: true };
+  }
+  const result = rateThink(queue, gotIt);
+  return {
+    phase: "think",
+    queue: result.queue,
+    got: gotIt ? [...(state.got || []), current.id] : [...(state.got || [])],
+    misses: (state.misses || 0) + (result.dropped ? 1 : 0),
+    finished: result.done
+  };
 }
 
 function makeLineWindow(lines, block, start, end, rng) {
@@ -462,6 +673,7 @@ function markSing(questions, rng, count, force) {
 export function buildLesson(lines, gameId, rng = Math.random, sections = [], options = {}) {
   const list = [...(lines || [])];
   const labels = sections || [];
+  if (gameId === "fade" || gameId === "think") return keepRounds(studyLesson(list, labels, gameId), options);
   if (gameId === "lines") return keepRounds(lineLesson(list, labels, rng, Number.isInteger(options.chunk) ? options.chunk : null), options);
   if (gameId === "next") {
     const lesson = keepRounds(nextLesson(list, labels, rng), options);
@@ -497,25 +709,28 @@ function unfinished(questions, rounds) {
 }
 
 export function nextPractice(lines, sections = [], { rounds = {}, chapters = {} } = {}) {
+  const fade = studyLesson(lines, sections, "fade");
+  const think = studyLesson(lines, sections, "think");
   const build = lineLesson(lines, sections, () => 0.5, null);
   const recall = nextLesson(lines, sections, () => 0.5);
-  const buildDone = !unfinished(build, rounds);
-  const recallDone = !unfinished(recall, rounds);
   const plan = chapterPlan(lines, sections, {
     ...chapters,
-    lines: chapters.lines || buildDone,
-    next: chapters.next || recallDone
+    fade: chapters.fade || !unfinished(fade, rounds),
+    think: chapters.think || !unfinished(think, rounds),
+    lines: chapters.lines || !unfinished(build, rounds),
+    next: chapters.next || !unfinished(recall, rounds)
   });
   const playable = (id) => plan.find((chapter) => chapter.id === id)?.status === "open";
-  if (playable("lines")) {
-    const question = unfinished(build, rounds);
-    if (question) return { gameId: "lines", roundId: question.roundId };
-  }
-  if (playable("next")) {
-    const question = unfinished(recall, rounds);
-    if (question) return { gameId: "next", roundId: question.roundId };
-  }
-  return { gameId: "concert" };
+  const openRound = (id, questions) => {
+    if (!playable(id)) return null;
+    const question = unfinished(questions, rounds);
+    return question ? { gameId: id, roundId: question.roundId } : null;
+  };
+  return openRound("fade", fade)
+    || openRound("think", think)
+    || openRound("lines", build)
+    || openRound("next", recall)
+    || { gameId: "concert" };
 }
 
 export function sectionProgress(lines, sections = [], rounds = {}) {

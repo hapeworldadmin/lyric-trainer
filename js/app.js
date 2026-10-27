@@ -1,15 +1,19 @@
 import { blip } from "./audio.js?v=9";
 import { readClipboardFromGesture } from "./clipboard.js?v=9";
-import { activeConcertSummary, concertStatusLine, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=9";
+import { activeConcertSummary, concertStatusLine, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=10";
 import {
   GAMES,
+  advanceFade,
   answersMatch,
+  applyThink,
   buildLesson,
   chapterPlan,
   correctLine,
-  gradeAnswer,
+  fadePassLabel,
   firstLessonId,
   gameAvailability,
+  gradeAnswer,
+  initialThink,
   judgeOrderTap,
   lessonBonus,
   nextPractice,
@@ -17,8 +21,9 @@ import {
   questionSeconds,
   sectionProgress,
   seededRng,
-  singingMatch
-} from "./games.js?v=11";
+  singingMatch,
+  studyFrame
+} from "./games.js?v=12";
 import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=9";
 import {
   addBonusXp,
@@ -34,9 +39,9 @@ import {
   resetLineMasteryIfChanged,
   retitleSongProgress,
   songStats
-} from "./progress.js?v=9";
+} from "./progress.js?v=10";
 import { SAMPLE_SONG } from "./sample.js?v=9";
-import { createScoreProvider, sanitizeRun } from "./scores.js?v=9";
+import { createScoreProvider, sanitizeRun } from "./scores.js?v=10";
 import { drawShareCard, shareText } from "./share.js?v=9";
 import {
   activePlayer,
@@ -46,7 +51,7 @@ import {
   sampleRecord,
   saveState,
   seedSample
-} from "./storage.js?v=9";
+} from "./storage.js?v=10";
 import { createLineRecognizer, speechRecognitionSupported } from "./speech.js?v=11";
 import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=11";
 import { interpretHearing } from "./voice.js?v=11";
@@ -526,15 +531,16 @@ function viewSong() {
     letters: "Needs a line to hint"
   };
   const chapters = plan.map((chapter, index) => {
+    const testid = `data-testid="game-${chapter.id}"`;
     if (chapter.status === "unavailable") {
-      return `<button class="game" type="button" disabled><span>${index + 1} ${escapeHtml(chapter.name)}<small>Not enough lines</small></span></button>`;
+      return `<button class="game" type="button" disabled ${testid}><span>${index + 1} ${escapeHtml(chapter.name)}<small>Not enough lines</small></span></button>`;
     }
     if (chapter.status === "locked") {
-      return `<button class="game" type="button" disabled><span>${index + 1} ${escapeHtml(chapter.name)}<small>Finish the previous chapter</small></span></button>`;
+      return `<button class="game" type="button" disabled ${testid}><span>${index + 1} ${escapeHtml(chapter.name)}<small>Finish the previous chapter</small></span></button>`;
     }
     const mark = chapter.status === "done" ? "Done" : "Open";
     return `
-      <a class="game${chapter.id === "concert" ? " is-final" : ""}" data-testid="game-${chapter.id}" href="#/play/${encodeURIComponent(song.id)}/${chapter.id}">
+      <a class="game${chapter.id === "concert" ? " is-final" : ""}" ${testid} href="#/play/${encodeURIComponent(song.id)}/${chapter.id}">
         <span>${index + 1} ${escapeHtml(chapter.name)}<small>${escapeHtml(chapter.detail)} · ${mark}</small></span>
       </a>`;
   }).join("");
@@ -581,6 +587,7 @@ function viewSong() {
 function viewPlay() {
   const play = session.play;
   if (!play) return `<section class="screen"><p>That lesson is over.</p></section>`;
+  ensureStudy();
   const question = play.questions[play.index];
   const total = play.questions.length;
   const shown = play.feedback ? play.index + 1 : play.index;
@@ -597,7 +604,7 @@ function viewPlay() {
   ` : "";
   const around = contextHtml(question);
   const parts = play.feedback ? { tray: "", chips: "" } : answerParts(question);
-  const action = play.feedback ? continueControl(play) : (question.kind === "order" ? checkControl() : "");
+  const action = play.feedback ? continueControl(play) : studyOrCheck(question);
   const dock = `${play.feedback ? feedbackBody(play) : parts.chips}${action}`;
   return `
     <section class="screen play-screen" data-testid="play">
@@ -632,10 +639,17 @@ function formatSeconds(seconds) {
 
 function playCrumb(play, question) {
   const context = question?.context || {};
+  let position = context.position || 0;
+  if (question?.kind === "fade" && play?.study?.kind === "fade") {
+    const step = question.steps?.[play.study.line];
+    if (step) position = step.id + 1;
+  }
+  if (question?.kind === "think" && play?.study?.queue?.[0]) position = play.study.queue[0].id + 1;
+  const study = question?.kind === "fade" || question?.kind === "think";
   let place = "";
-  if (context.section && context.position) place = `${context.section}, line ${context.position}`;
-  else if (context.rangeLabel) place = context.rangeLabel;
-  else if (context.position) place = `line ${context.position}`;
+  if (context.section && position) place = `${context.section}, line ${position}`;
+  else if (!study && context.rangeLabel) place = context.rangeLabel;
+  else if (position) place = `line ${position}`;
   return place ? `${play.gameName} · ${place}` : play.gameName;
 }
 
@@ -644,14 +658,15 @@ function qLabel(text, testid = "") {
   return `<p class="q-label"${attr}>${escapeHtml(text)}</p>`;
 }
 
-function lyricBlock(text, testid = "") {
+function lyricBlock(text, testid = "", extra = "") {
   const attr = testid ? ` data-testid="${testid}"` : "";
-  return `<div class="lyric-block"><p class="lyric-line"${attr}>${escapeHtml(text)}</p></div>`;
+  const cls = extra ? ` ${extra}` : "";
+  return `<div class="lyric-block${cls}"><p class="lyric-line"${attr}>${escapeHtml(text)}</p></div>`;
 }
 
 function contextHtml(question) {
   const context = question?.context;
-  if (!context) return { before: "", after: "" };
+  if (!context || question?.kind === "fade" || question?.kind === "think") return { before: "", after: "" };
   const showPrevious = context.previous && question.kind !== "next" && !question.hidesPrevious && !question.sing;
   let previous = showPrevious ? `${qLabel("Previous line")}${lyricBlock(context.previous, "context-previous")}` : "";
   if (question.sing && question.prompt) {
@@ -667,6 +682,7 @@ function voiceReady() {
 }
 
 function questionHtml(question) {
+  if (question.kind === "fade" || question.kind === "think") return studyHtml(question);
   if (question.sing) {
     const ask = voiceReady() ? "Sing or type the next line" : "Type the next line";
     return qLabel(ask, "question");
@@ -697,6 +713,25 @@ function questionHtml(question) {
   if (question.kind === "intruder") return qLabel("Which line does not belong?", "question");
   if (question.kind === "lines") return qLabel("Tap the lines in order", "question");
   return qLabel("Tap the words in order", "question");
+}
+
+function studyHtml(question) {
+  const frame = studyFrame(question, ensureStudy() || {});
+  if (!frame) return qLabel("Read this line", "question");
+  const previous = frame.previous
+    ? `${qLabel("Previous line")}${lyricBlock(frame.previous, "context-previous", "is-context")}`
+    : "";
+  if (frame.kind === "think") {
+    const target = frame.target ? lyricBlock(frame.target, "think-line") : "";
+    return `${previous}${qLabel(frame.prompt, "question")}${target}`;
+  }
+  const words = frame.words.map((word) => (
+    word
+      ? `<span class="target-word">${escapeHtml(word)}</span>`
+      : `<span class="target-blank" data-testid="fade-blank"></span>`
+  )).join(" ");
+  const place = `${fadePassLabel(frame.pass)} · line ${frame.line + 1} of ${frame.lineCount}`;
+  return `${previous}${qLabel(frame.prompt, "question")}<div class="lyric-block"><p class="target-line" data-testid="fade-line">${words}</p></div><p class="hint" data-testid="fade-pass">${escapeHtml(place)}</p>`;
 }
 
 function orderTargetHtml(question) {
@@ -752,6 +787,7 @@ function singAnswerParts() {
 }
 
 function answerParts(question) {
+  if (question.kind === "fade" || question.kind === "think") return { tray: "", chips: "" };
   if (question.sing) return singAnswerParts();
   if (question.choices && question.kind !== "order") {
     return {
@@ -779,6 +815,26 @@ function answerParts(question) {
     };
   }
   return { tray: "", chips: "" };
+}
+
+function studyOrCheck(question) {
+  if (question?.kind === "fade" || question?.kind === "think") return studyControl(question);
+  if (question?.kind === "order") return checkControl();
+  return "";
+}
+
+function studyControl(question) {
+  const frame = studyFrame(question, ensureStudy() || {});
+  if (!frame) return "";
+  if (question.kind === "fade" || frame.phase === "think") {
+    const action = question.kind === "fade" ? "fade-advance" : "think-show";
+    const testid = question.kind === "fade" ? "fade-advance" : "think-show";
+    return `<div class="dock"><button class="btn btn-primary" type="button" data-action="${action}" data-primary data-option="0" data-testid="${testid}">${escapeHtml(frame.action)} <span class="key-hint">Enter</span></button></div>`;
+  }
+  return `<div class="dock">
+    <button class="btn btn-primary" type="button" data-action="think-rate" data-rate="got" data-primary data-option="0" data-testid="think-got">Got it <span class="key-hint">1</span></button>
+    <button class="btn btn-secondary" type="button" data-action="think-rate" data-rate="missed" data-option="1" data-testid="think-missed">Missed it <span class="key-hint">2</span></button>
+  </div>`;
 }
 
 function checkControl() {
@@ -1385,6 +1441,7 @@ function ensurePlay() {
     voiceDisplay: "",
     fromVoice: false,
     miss: null,
+    study: null,
     order: null,
     questionMistakes: 0,
     deadline: null,
@@ -1578,6 +1635,67 @@ function revealSingAnswer() {
   submitCurrent({ singFailed: true });
 }
 
+function ensureStudy() {
+  const play = session.play;
+  const question = currentQuestion();
+  if (!play || !question) return null;
+  if (question.kind !== "fade" && question.kind !== "think") return null;
+  if (!play.study || play.study.index !== play.index || play.study.kind !== question.kind) {
+    const fresh = question.kind === "think" ? initialThink(question) : { pass: 0, line: 0, revealed: 0 };
+    play.study = { index: play.index, kind: question.kind, ...fresh };
+  }
+  return play.study;
+}
+
+function advanceFadeTap() {
+  const play = session.play;
+  const question = currentQuestion();
+  if (!play || play.locked || question?.kind !== "fade") return;
+  const study = ensureStudy();
+  const next = advanceFade(question, study);
+  if (next.finished) {
+    submitCurrent({
+      study: true,
+      studyMistakes: 0,
+      studyMastered: true,
+      studyGot: (question.steps || []).map((step) => step.id)
+    });
+    return;
+  }
+  play.study = { ...study, ...next, index: play.index, kind: "fade" };
+  render();
+}
+
+function showThinkLine() {
+  const play = session.play;
+  const question = currentQuestion();
+  if (!play || play.locked || question?.kind !== "think") return;
+  const study = ensureStudy();
+  if (study.phase !== "think") return;
+  study.phase = "rate";
+  render();
+}
+
+function rateThinkTap(gotIt) {
+  const play = session.play;
+  const question = currentQuestion();
+  if (!play || play.locked || question?.kind !== "think") return;
+  const study = ensureStudy();
+  if (study.phase !== "rate") return;
+  const next = applyThink(study, gotIt);
+  if (next.finished) {
+    submitCurrent({
+      study: true,
+      studyMistakes: next.misses,
+      studyMastered: next.misses === 0,
+      studyGot: next.got
+    });
+    return;
+  }
+  play.study = { index: play.index, kind: "think", ...next };
+  render();
+}
+
 function submitCurrent(forced = null) {
   const play = session.play;
   if (!play || play.locked) return;
@@ -1597,6 +1715,8 @@ function submitCurrent(forced = null) {
         ? interpretHearing(question.answer || question.line, [given], song.lines || []).pass
         : singingMatch(question.answer || question.line, given);
     }
+  } else if (forced?.study) {
+    correct = Boolean(forced.studyMastered);
   } else if (question.choices) {
     play.picked = forced?.choice ?? play.picked;
     if (!play.picked) return;
@@ -1625,7 +1745,7 @@ function submitCurrent(forced = null) {
     play.bestCombo = Math.max(play.bestCombo, play.combo);
   } else {
     play.combo = 0;
-    if (!forced?.orderFailed && !forced?.singFailed) {
+    if (!forced?.orderFailed && !forced?.singFailed && !forced?.study) {
       play.questionMistakes += 1;
       play.hearts = Math.max(0, play.hearts - 1);
     }
@@ -1633,17 +1753,26 @@ function submitCurrent(forced = null) {
   const secondsLeft = play.gameId === "concert" && play.deadline
     ? Math.max(0, (play.deadline - performance.now()) / 1000)
     : null;
+  const progress = progressOf(session.state);
   if (question.roundId) {
-    recordRoundResult(progressOf(session.state), song, {
+    recordRoundResult(progress, song, {
       roundId: question.roundId,
-      mistakes: play.questionMistakes,
-      completed: correct
+      mistakes: forced?.study ? (forced.studyMistakes || 0) : play.questionMistakes,
+      completed: forced?.study ? Boolean(forced.studyMastered) : correct
     });
   }
   const points = pointsFor({ kind: question.kind, correct, combo: play.combo, secondsLeft });
   play.xp += points.xp;
   play.score += points.score;
-  recordLineResult(progressOf(session.state), song, { line: question.line, correct, xpGain: points.xp });
+  if (question.kind === "fade" || question.kind === "think") {
+    const got = new Set(forced?.studyGot || []);
+    (question.steps || []).forEach((step, index) => {
+      const lineCorrect = question.kind === "fade" ? Boolean(forced?.studyMastered) : got.has(step.id);
+      recordLineResult(progress, song, { line: step.text, correct: lineCorrect, xpGain: index === 0 ? points.xp : 0 });
+    });
+  } else {
+    recordLineResult(progress, song, { line: question.line, correct, xpGain: points.xp });
+  }
   persist();
   play.feedback = {
     correct,
@@ -1687,6 +1816,7 @@ function continueLesson() {
   play.voiceDisplay = "";
   play.fromVoice = false;
   play.miss = null;
+  play.study = null;
   play.order = null;
   play.questionMistakes = 0;
   play.deadline = null;
@@ -2190,7 +2320,10 @@ function onClick(event) {
   else if (action === "cant-sing") cantSing();
   else if (action === "pick-token") {
     judgePickedToken(el);
-  } else if (action === "show-answer") revealSingAnswer();
+  } else if (action === "fade-advance") advanceFadeTap();
+  else if (action === "think-show") showThinkLine();
+  else if (action === "think-rate") rateThinkTap(el.dataset.rate !== "missed");
+  else if (action === "show-answer") revealSingAnswer();
   else if (action === "check") {
     if (currentQuestion()?.sing) judgeSing();
     else submitCurrent();

@@ -1,9 +1,9 @@
-import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js?v=9";
+import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js?v=10";
 
 export const MASTER_CORRECT = 2;
 export const ROUND_MISTAKE_LIMIT = 1;
-const GAMES = new Set(["fill", "order", "next", "letters", "concert", "lines"]);
-const CHAPTER_IDS = ["lines", "next", "concert"];
+const GAMES = new Set(["fill", "order", "next", "letters", "concert", "lines", "fade", "think"]);
+const CHAPTER_IDS = ["fade", "think", "lines", "next", "concert"];
 
 export function emptyProgress() {
   return {
