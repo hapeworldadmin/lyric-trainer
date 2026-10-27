@@ -15,8 +15,9 @@ import {
   nextPractice,
   pointsFor,
   questionSeconds,
-  sectionProgress
-} from "./games.js?v=9";
+  sectionProgress,
+  seededRng
+} from "./games.js?v=10";
 import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=9";
 import {
   addBonusXp,
@@ -45,6 +46,7 @@ import {
   saveState,
   seedSample
 } from "./storage.js?v=9";
+import { createLineRecognizer, speechRecognitionSupported } from "./speech.js?v=10";
 import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=9";
 
 const session = {
@@ -65,6 +67,7 @@ const session = {
 
 let renderToken = 0;
 let timerId = null;
+let ear = null;
 
 const ICONS = {
   note: '<path fill="currentColor" d="M9 17.5a2.5 2.5 0 1 1-2.2-2.48V6.1l9-1.8v8.2a2.5 2.5 0 1 1-2-2.45V6.4l-4.8 1V17.5z"/>',
@@ -76,7 +79,8 @@ const ICONS = {
   trophy: '<path fill="currentColor" d="M7 4h10v3a5 5 0 0 1-3 4.6V16h3v2H7v-2h3v-4.4A5 5 0 0 1 7 7V4zm0 2v1a3 3 0 0 0 3 3h1V6zm10 0h-4v4h1a3 3 0 0 0 3-3z"/>',
   user: '<path fill="currentColor" d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4 0-7 2-7 4.5V21h14v-2.5C19 16 16 14 12 14z"/>',
   back: '<path fill="currentColor" d="M14.5 5 7.5 12l7 7 1.4-1.4L10.3 12l5.6-5.6z"/>',
-  close: '<path fill="currentColor" d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z"/>'
+  close: '<path fill="currentColor" d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z"/>',
+  mic: '<path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-4 4.9V19h3v2H8v-2h3v-2.1A5 5 0 0 1 7 12H5a7 7 0 0 0 6 6.7V21h2v-2.3A7 7 0 0 0 19 12h-2z"/>'
 };
 
 function icon(name) {
@@ -124,6 +128,9 @@ async function boot() {
   document.addEventListener("input", onInput);
   document.addEventListener("submit", onSubmit);
   document.addEventListener("change", onChange);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") stopListening();
+  });
   if (!location.hash) location.hash = "#/";
   sync();
 }
@@ -149,7 +156,10 @@ function safeDecode(value) {
 
 function sync() {
   session.route = parseHash();
-  if (session.route.name !== "play") stopTimer();
+  if (session.route.name !== "play") {
+    stopTimer();
+    stopListening();
+  }
   if (session.route.name === "add" || session.route.name === "edit") ensureForm();
   if (session.route.name === "results" && !session.results) {
     location.hash = "#/";
@@ -603,15 +613,26 @@ function playCrumb(play, question) {
 function contextHtml(question) {
   const context = question?.context;
   if (!context) return { before: "", after: "" };
-  const showPrevious = context.previous && question.kind !== "next" && !question.hidesPrevious;
-  const previous = showPrevious ? `<p class="context-line is-anchor" data-testid="context-previous">${escapeHtml(context.previous)}</p>` : "";
+  const showPrevious = context.previous && question.kind !== "next" && !question.hidesPrevious && !question.sing;
+  let previous = showPrevious ? `<p class="context-line is-anchor" data-testid="context-previous">${escapeHtml(context.previous)}</p>` : "";
+  if (question.sing && question.prompt) {
+    previous = `<p class="context-meta">Previous line</p><p class="context-line is-anchor" data-testid="context-previous">${escapeHtml(question.prompt)}</p>`;
+  }
   const allowNext = session.play?.gameId === "lines" && question.kind === "lines";
   const next = allowNext && context.next
     ? `<p class="context-line" data-testid="context-next">${escapeHtml(context.next)}</p>` : "";
   return { before: previous, after: next };
 }
 
+function voiceReady() {
+  return speechRecognitionSupported() && !session.play?.voiceOff;
+}
+
 function questionHtml(question) {
+  if (question.sing) {
+    const ask = voiceReady() ? "Sing or type the next line" : "Type the next line";
+    return `<p class="ask" data-testid="question">${ask}</p>`;
+  }
   if (question.kind === "order") return orderTargetHtml(question);
   if (question.kind === "fill") {
     const picked = session.play.picked;
@@ -658,7 +679,33 @@ function keyHint(index) {
   return `<span class="key-hint">${index + 1}</span>`;
 }
 
+function singAnswerParts() {
+  const play = session.play;
+  const voice = voiceReady();
+  const listening = Boolean(play?.listening) && voice;
+  const heard = escapeHtml(play?.typed || "");
+  const mic = voice ? `
+    <button class="mic-btn${listening ? " is-listening" : ""}" type="button" data-action="toggle-mic" data-testid="mic" aria-pressed="${listening ? "true" : "false"}" aria-label="${listening ? "Stop listening" : "Sing or speak"}">${icon("mic")}</button>` : "";
+  return {
+    tray: "",
+    chips: `
+      <form id="answer-form" class="sing-form" data-testid="sing-form">
+        <p class="sing-status" data-testid="listen-status" ${listening ? "" : "hidden"}>Listening</p>
+        <div class="sing-field" id="sing-field" data-testid="sing-field">
+          <p class="live-transcript" data-testid="live-transcript" ${listening && play?.typed ? "" : "hidden"}>${heard}</p>
+          <div class="sing-row">
+            <input class="sing-input" id="answer-input" data-testid="sing-input" type="text" enterkeyhint="done" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Type the next line" aria-label="Next line" value="${heard}">
+            ${mic}
+          </div>
+        </div>
+        <button class="btn btn-secondary" type="button" data-action="cant-sing" data-testid="cant-sing">Can't sing now</button>
+        <button class="btn btn-primary" type="submit" data-action="check" data-primary data-testid="check">Check <span class="key-hint">Enter</span></button>
+      </form>`
+  };
+}
+
 function answerParts(question) {
+  if (question.sing) return singAnswerParts();
   if (question.choices && question.kind !== "order") {
     return {
       tray: "",
@@ -1255,13 +1302,18 @@ function ensurePlay() {
   }
   const roundId = route.params.round || "";
   const chunk = route.params.chunk === undefined || route.params.chunk === "" ? null : Number(route.params.chunk);
-  const key = `${song.id}:${game.id}:${roundId}:${chunk ?? ""}`;
+  const seedValue = Number(route.params.seed);
+  const singFlag = route.params.sing === "1" ? "1" : "";
+  const key = `${song.id}:${game.id}:${roundId}:${chunk ?? ""}:${Number.isInteger(seedValue) ? seedValue : ""}:${singFlag}`;
   if (session.play?.key === key) return true;
+  stopListening();
   const skipIds = route.params.again === "1" || game.id === "concert" ? [] : masteredRoundIds(progressOf(session.state), song);
-  const questions = buildLesson(song.lines, game.id, Math.random, song.sections || [], {
+  const rng = Number.isInteger(seedValue) && seedValue > 0 ? seededRng(seedValue) : Math.random;
+  const questions = buildLesson(song.lines, game.id, rng, song.sections || [], {
     skipIds,
     roundId,
-    chunk: Number.isInteger(chunk) ? chunk : undefined
+    chunk: Number.isInteger(chunk) ? chunk : undefined,
+    forceSing: route.params.sing === "1"
   });
   if (!questions.length) {
     armToast(skipIds.length ? "That chapter is mastered." : "That game needs more lines in this song.");
@@ -1288,6 +1340,8 @@ function ensurePlay() {
     feedback: null,
     picked: null,
     typed: "",
+    listening: false,
+    voiceOff: false,
     order: null,
     questionMistakes: 0,
     deadline: null,
@@ -1314,6 +1368,131 @@ function rememberTyped() {
   if (input && session.play) session.play.typed = input.value;
 }
 
+function paintListening() {
+  const play = session.play;
+  const on = Boolean(play?.listening);
+  const mic = document.querySelector("[data-testid=mic]");
+  if (mic) {
+    mic.classList.toggle("is-listening", on);
+    mic.setAttribute("aria-pressed", on ? "true" : "false");
+    mic.setAttribute("aria-label", on ? "Stop listening" : "Sing or speak");
+  }
+  const status = document.querySelector("[data-testid=listen-status]");
+  if (status) status.hidden = !on;
+  const live = document.querySelector("[data-testid=live-transcript]");
+  if (live) live.hidden = !on || !play?.typed;
+}
+
+function showHeard(text) {
+  const play = session.play;
+  if (!play) return;
+  play.typed = text;
+  const input = document.getElementById("answer-input");
+  const live = document.querySelector("[data-testid=live-transcript]");
+  if (input) input.value = text;
+  if (live) {
+    live.textContent = text;
+    live.hidden = !text;
+  }
+}
+
+function stopListening() {
+  const play = session.play;
+  if (play) play.listening = false;
+  const current = ear;
+  ear = null;
+  current?.abort();
+  paintListening();
+}
+
+function toggleMic() {
+  const play = session.play;
+  const question = currentQuestion();
+  if (!play || play.locked || play.orderBusy || !question?.sing) return;
+  if (play.listening) {
+    stopListening();
+    return;
+  }
+  if (!speechRecognitionSupported() || play.voiceOff) return;
+  const next = createLineRecognizer({
+    onTranscript(text) {
+      if (session.play !== play || !play.listening) return;
+      showHeard(text);
+    },
+    onDenied() {
+      if (session.play !== play) return;
+      play.listening = false;
+      play.voiceOff = true;
+      ear = null;
+      render();
+    },
+    onUnsupported() {
+      if (session.play !== play) return;
+      play.listening = false;
+      play.voiceOff = true;
+      ear = null;
+      render();
+    },
+    onEnd() {
+      if (session.play !== play || play.voiceOff) return;
+      if (play.listening) {
+        play.listening = false;
+        paintListening();
+      }
+    }
+  });
+  if (!next) {
+    play.voiceOff = true;
+    render();
+    return;
+  }
+  ear = next;
+  play.listening = true;
+  paintListening();
+  next.start();
+}
+
+function cantSing() {
+  const play = session.play;
+  const question = currentQuestion();
+  if (!play || play.locked || play.orderBusy || !question?.sing) return;
+  stopListening();
+  question.sing = false;
+  play.typed = "";
+  play.listening = false;
+  render();
+}
+
+function judgeSing() {
+  const play = session.play;
+  const question = currentQuestion();
+  if (!play || play.locked || play.orderBusy || !question?.sing) return;
+  const given = (document.getElementById("answer-input")?.value ?? play.typed ?? "").trim();
+  if (!given) return;
+  play.orderBusy = true;
+  play.typed = given;
+  stopListening();
+  const field = document.getElementById("sing-field");
+  const correct = gradeAnswer(question, given);
+  field?.classList.add(correct ? "is-accept" : "is-reject");
+  buzz(correct ? 12 : 20);
+  blip(correct ? "ok" : "bad", session.state.settings.sound);
+  if (!correct) {
+    play.combo = 0;
+    play.questionMistakes += 1;
+    play.hearts = Math.max(0, play.hearts - 1);
+    paintHearts();
+  }
+  const failed = !correct && play.hearts <= 0;
+  window.setTimeout(() => {
+    if (session.play !== play) return;
+    play.orderBusy = false;
+    field?.classList.remove("is-reject", "is-accept");
+    if (correct) submitCurrent({ singText: given });
+    else if (failed) submitCurrent({ singFailed: true });
+  }, motionDelay());
+}
+
 function submitCurrent(forced = null) {
   const play = session.play;
   if (!play || play.locked) return;
@@ -1326,6 +1505,14 @@ function submitCurrent(forced = null) {
   } else if (question.kind === "swap") {
     if (!forced?.swapId) return;
     correct = gradeAnswer(question, forced.swapId);
+  } else if (question.sing) {
+    if (forced?.singFailed) {
+      correct = false;
+    } else {
+      const given = String(forced?.singText ?? "").trim();
+      if (!given) return;
+      correct = gradeAnswer(question, given);
+    }
   } else if (question.choices) {
     play.picked = forced?.choice ?? play.picked;
     if (!play.picked) return;
@@ -1345,6 +1532,7 @@ function submitCurrent(forced = null) {
     return;
   }
   play.locked = true;
+  stopListening();
   stopTimer();
   play.answered += 1;
   if (correct) {
@@ -1353,7 +1541,7 @@ function submitCurrent(forced = null) {
     play.bestCombo = Math.max(play.bestCombo, play.combo);
   } else {
     play.combo = 0;
-    if (!forced?.orderFailed) {
+    if (!forced?.orderFailed && !forced?.singFailed) {
       play.questionMistakes += 1;
       play.hearts = Math.max(0, play.hearts - 1);
     }
@@ -1375,12 +1563,14 @@ function submitCurrent(forced = null) {
   persist();
   play.feedback = {
     correct,
-    answer: correctLine(question),
+    answer: question.sing ? (question.answer || correctLine(question)) : correctLine(question),
     xp: points.xp,
     timeout: Boolean(forced?.timeout)
   };
-  blip(correct ? "ok" : "bad", session.state.settings.sound);
-  if (navigator.vibrate) navigator.vibrate(correct ? 12 : [18, 30, 18]);
+  if (!forced?.singText && !forced?.singFailed) {
+    blip(correct ? "ok" : "bad", session.state.settings.sound);
+    if (navigator.vibrate) navigator.vibrate(correct ? 12 : [18, 30, 18]);
+  }
   render();
 }
 
@@ -1398,6 +1588,7 @@ function showPlayNote(message) {
 function continueLesson() {
   const play = session.play;
   if (!play) return;
+  stopListening();
   if (play.hearts <= 0 || play.index >= play.questions.length - 1) {
     finishLesson();
     return;
@@ -1407,6 +1598,7 @@ function continueLesson() {
   play.feedback = null;
   play.picked = null;
   play.typed = "";
+  play.listening = false;
   play.order = null;
   play.questionMistakes = 0;
   play.deadline = null;
@@ -1437,6 +1629,7 @@ async function finishLesson() {
   const play = session.play;
   if (!play || play.finishing) return;
   play.finishing = true;
+  stopListening();
   stopTimer();
   const song = findSong(play.songId);
   const state = session.state;
@@ -1499,6 +1692,7 @@ function startTimer() {
       stopTimer();
       return;
     }
+    if (session.play.orderBusy) return;
     const left = session.play.deadline - performance.now();
     const bar = document.getElementById("timer-bar");
     const label = document.getElementById("timer-label");
@@ -1537,6 +1731,7 @@ function askDelete(id) {
 
 function leaveLesson() {
   stopTimer();
+  stopListening();
   session.modal = {
     title: "Leave this lesson?",
     body: "Hearts reset next time. XP you already earned stays saved.",
@@ -1902,7 +2097,9 @@ function onClick(event) {
   else if (action === "choose") {
     const choice = currentQuestion()?.choices?.[Number(el.dataset.choice)];
     if (choice) submitCurrent({ choice });
-  }   else if (action === "pick-token") {
+  } else if (action === "toggle-mic") toggleMic();
+  else if (action === "cant-sing") cantSing();
+  else if (action === "pick-token") {
     judgePickedToken(el);
   } else if (action === "pick-swap") {
     const button = el;
@@ -1918,7 +2115,10 @@ function onClick(event) {
       return;
     }
     submitCurrent({ swapId: word.id });
-  } else if (action === "check") submitCurrent();
+  } else if (action === "check") {
+    if (currentQuestion()?.sing) judgeSing();
+    else submitCurrent();
+  }
   else if (action === "keep-practicing") keepPracticing();
   else if (action === "toggle-sections") {
     if (session.results) session.results.showSections = !session.results.showSections;
@@ -2000,6 +2200,10 @@ async function copyShare() {
 }
 
 function onInput(event) {
+  if (event.target.id === "answer-input") {
+    if (session.play) session.play.typed = event.target.value;
+    if (event.isTrusted && session.play?.listening) stopListening();
+  }
   if (event.target.id === "lyrics") onLyricsInput(event);
   if (event.target.id === "title" || event.target.id === "artist") {
     if (session.form) session.form.titleTouched = true;
@@ -2010,7 +2214,8 @@ function onInput(event) {
 function onSubmit(event) {
   if (event.target.id === "answer-form") {
     event.preventDefault();
-    submitCurrent();
+    if (currentQuestion()?.sing) judgeSing();
+    else submitCurrent();
   } else if (event.target.id === "player-form") {
     event.preventDefault();
     const name = document.getElementById("player-name")?.value || "";
