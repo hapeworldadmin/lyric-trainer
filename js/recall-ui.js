@@ -1,5 +1,6 @@
-import { escapeHtml } from "./text.js?v=16";
+import { comboMultiplier } from "./memory.js?v=16";
 import { recallPrompt } from "./recall.js?v=16";
+import { escapeHtml } from "./text.js?v=16";
 
 function heartsHtml(play, icon) {
   return Array.from({ length: play.maxHearts }, (_, index) => (
@@ -40,10 +41,12 @@ export function recallPlayHtml(play) {
           <button class="icon-btn" type="button" data-action="leave" data-testid="leave-lesson" aria-label="Close lesson">${play.closeIcon || ""}</button>
           <p class="play-crumb" data-testid="play-crumb">${escapeHtml(play.gameName)} · ${escapeHtml(label)}</p>
           <div class="play-meta">
+            <span class="score-pill" data-testid="combo-pill" aria-label="Combo x${comboMultiplier(run.combo)}">x${comboMultiplier(run.combo)}</span>
             <span class="score-pill" data-testid="score-pill" aria-label="XP ${run.xp}">${run.xp} XP</span>
             <div class="hearts" data-testid="hearts" aria-label="${run.hearts} of ${run.maxHearts} hearts">${hearts}</div>
           </div>
         </div>
+        ${play.relaxed ? "" : `<div class="tide" data-testid="tide" role="progressbar" aria-label="Time left" aria-valuemin="0" aria-valuemax="100"><span id="tide-bar"></span></div>`}
         <div class="play-body recall-body">
           ${previous}
           ${cold ? "" : `<p class="q-label" data-testid="question">${escapeHtml(label)}</p>`}
@@ -104,13 +107,19 @@ export function recallSummaryHtml(play) {
   const run = play.run;
   const won = run.status === "done";
   const accuracy = run.answered ? Math.round((100 * run.correct) / run.answered) : 0;
+  const missed = !won && play.lastMiss
+    ? `<p class="lyric-line" data-testid="missed-line">${escapeHtml(play.lastMiss)}</p>`
+    : "";
+  const label = play.doneLabel || "Back to song";
+  const action = play.doneAction || "recall-done";
   return `
     <section class="screen" data-testid="run-summary">
       <header class="page-head">
-        <p class="kicker">${won ? "Run clear" : "Run over"}</p>
+        <p class="kicker">${escapeHtml(play.doneKicker || (won ? "Run clear" : "Run over"))}</p>
         <h1>${run.xp} XP</h1>
         <p class="sub">${accuracy}% correct · ${run.hearts} hearts</p>
       </header>
-      <button class="btn btn-primary" type="button" data-action="recall-done" data-primary data-testid="run-done">Back to song</button>
+      ${missed}
+      <button class="btn btn-primary" type="button" data-action="${escapeHtml(action)}" data-primary data-testid="run-done">${escapeHtml(label)}</button>
     </section>`;
 }

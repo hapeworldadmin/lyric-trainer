@@ -36,7 +36,11 @@ export function applyMiss(record, now = Date.now()) {
   return row;
 }
 
-export function recallXp({ level = 0, sung = false } = {}) {
+export function comboMultiplier(combo = 0) {
+  return Math.min(5, 1 + Math.floor(Math.max(0, combo) / 4));
+}
+
+export function recallXp({ level = 0, combo = 0, sung = false } = {}) {
   const weight = WEIGHT[Math.max(0, Math.min(4, level))] || 1;
-  return Math.max(1, Math.round(10 * weight * (sung ? 1.25 : 1)));
+  return Math.max(1, Math.round(10 * weight * comboMultiplier(combo) * (sung ? 1.25 : 1)));
 }

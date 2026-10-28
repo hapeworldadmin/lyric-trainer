@@ -1,12 +1,13 @@
 // Versioned, idempotent migrations. Existing songs, scores, and rounds stay.
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export function migrateState(state) {
   if (!state || typeof state !== "object") return state;
   let version = Number(state.schemaVersion) || 1;
   if (version < 2) version = migrateToRecallSchema(state);
   if (version < 3) version = migrateToAnswerSettings(state);
+  if (version < 4) version = migrateToRelaxed(state);
   state.schemaVersion = version;
   return state;
 }
@@ -33,4 +34,10 @@ function migrateToAnswerSettings(state) {
   state.settings.cantSing = Boolean(state.settings.cantSing);
   if (state.settings.answerMode !== "type") state.settings.answerMode = "tiles";
   return 3;
+}
+
+function migrateToRelaxed(state) {
+  state.settings ||= {};
+  if (state.settings.relaxed !== true) state.settings.relaxed = false;
+  return 4;
 }

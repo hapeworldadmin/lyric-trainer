@@ -579,6 +579,21 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
   .btn .key-hint { margin: 0 0 0 8px; }
 }
 
+.tide {
+  height: 6px;
+  margin: 0 0 16px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.tide > span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--accent);
+  transform-origin: left center;
+  transform: scaleX(1);
+}
 .recall-answer { min-height: 168px; }
 .recall-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .recall-tools .btn { width: auto; min-height: 44px; }
