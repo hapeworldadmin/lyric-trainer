@@ -969,6 +969,38 @@ iframe[title*="Netlify"] {
   font-size: 16px;
   min-height: 48px;
 }
+.link-panel {
+  --accent: #8b6fff;
+  --on-accent: #0b0b0f;
+  --glow: transparent;
+}
+.link-actions { margin-top: 8px; }
+.link-code {
+  margin: 20px 0 8px;
+  font-family: var(--display);
+  font-size: clamp(32px, 10vw, 44px);
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  line-height: 1.1;
+  text-align: center;
+  color: var(--violet);
+  user-select: all;
+  -webkit-user-select: all;
+}
+.link-panel input {
+  min-height: 64px;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.link-panel .btn-primary {
+  background: var(--violet);
+  color: #0b0b0f;
+  box-shadow: none;
+}
+.link-panel .fine { margin-top: 12px; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

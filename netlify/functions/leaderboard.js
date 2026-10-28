@@ -14,6 +14,9 @@ export function adaptStore(store) {
     async list(prefix) {
       const page = await store.list({ prefix });
       return (page?.blobs || []).map((blob) => blob.key);
+    },
+    async delete(key) {
+      await store.delete(key);
     }
   };
 }

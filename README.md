@@ -2,7 +2,7 @@
 
 Know the Verse is a small, mobile-friendly game for memorizing song lyrics **you paste yourself**. Each round is a few lines. Early rounds lean on reading the line. Later rounds lean on recall. A timed final run covers the whole song.
 
-It is a static site. There is no account and no server. Lyrics stay in your browser.
+There is no account. Lyrics stay in this browser. Scores and lesson progress can follow a player you link between devices.
 
 ## How to use it
 
@@ -96,6 +96,8 @@ The site is the repository root. [`.nojekyll`](.nojekyll) is included so Pages s
 ## Shared board
 
 The Board tab shows the top 20 overall and the top 20 for one song, plus your own rank. The name is saved in this browser. Scores and XP sync when you are online. If you are offline, they still save on this device and sync later.
+
+**Link another device** on the Board or in settings makes a 6 character code. It expires in about 10 minutes and works once. On the other device, **I have a code** joins that same player. The board keeps one row. For each song it keeps the higher score, then adds those songs up once. Lesson progress follows too: mastered sections and chapter state. A section id is a short hash, not the words. Progress is applied only for songs that are already on that device, matched by title and artist. Lyric lines are not uploaded.
 
 A score sent to the board is the display name, a device id, the song id, the title, the artist, and the numbers. Lyric lines are not sent. The concert page still lists scores on this device only.
 
