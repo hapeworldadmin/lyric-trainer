@@ -1199,7 +1199,7 @@ function viewLink() {
         <p class="sub">Enter the code from your other device. Scores and lesson progress follow that player.</p>
         <form id="link-code-form" class="stack">
           <label class="field">Code
-            <input id="link-code-input" data-testid="link-code-input" type="text" name="device-code" inputmode="text" maxlength="12" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="Code" value="${escapeHtml(session.linkDraft || "")}">
+            <input id="link-code-input" data-testid="link-code-input" type="text" name="device-code" inputmode="text" maxlength="12" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="ABC DEF" value="${escapeHtml(session.linkDraft || "")}">
           </label>
           <p id="link-code-error" class="error" role="alert">${escapeHtml(session.linkError || "")}</p>
           <button class="btn btn-primary" type="submit" data-testid="link-submit" ${session.linkBusy ? "disabled" : ""}>Link</button>
@@ -1223,7 +1223,9 @@ function viewLink() {
     : "";
   const detail = session.linkError && !session.linkCode
     ? `<p class="error" role="alert">${escapeHtml(session.linkError)}</p>`
-    : `<p class="sub" data-testid="link-expiry">${escapeHtml(session.linkCode ? linkExpiryCopy(session.linkExpiresAt) : "On the other device, choose I have a code.")}</p>`;
+    : session.linkCode
+      ? `<p class="sub" data-testid="link-expiry">${escapeHtml(linkExpiryCopy(session.linkExpiresAt))}</p>`
+      : "";
   return `
     <section class="screen link-panel" data-testid="link-create">
       <header class="page-head">
@@ -2436,8 +2438,6 @@ function afterRender() {
   if (session.route.name === "add" && session.form?.fallback && !session.form.preview && lyrics) lyrics.focus();
   const paste = document.querySelector("[data-testid=paste-clipboard]");
   if (paste) paste.addEventListener("click", onClickPaste);
-  const codeInput = document.querySelector("[data-testid=link-code-input]");
-  if (codeInput && !session.linkBusy && document.activeElement !== codeInput) codeInput.focus();
   startTimer();
   fitPlayViewport();
 }
