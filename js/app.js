@@ -26,6 +26,7 @@ import {
   studyFrame
 } from "./games.js?v=14";
 import { editSummary } from "./identity.js?v=16";
+import { actionHref, bossSteps, dailySteps, dueRows, fullSteps, linesForSection, nextAction, sectionLearned, songMap } from "./map.js?v=16";
 import { homeScreenCopy, requestPersistentStorage } from "./install.js?v=16";
 import { recognizeImage } from "./ocr.js?v=16";
 import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=16";
@@ -41,8 +42,11 @@ import {
   recordLineResult,
   recordRoundResult,
   putRecall,
+  putSection,
   recallMap,
+  saveBestRun,
   recordRun,
+  sectionRecord,
   retitleSongProgress,
   songStats
 } from "./progress.js?v=16";
@@ -72,10 +76,12 @@ import {
   passRun,
   recallSingMatch,
   singRetry,
+  startSession,
   typedCorrect
 } from "./recall.js?v=16";
 import { recallPlayHtml } from "./recall-ui.js?v=16";
 import { completenessWarnings, mergeWithNext, prepareImportedText, presetFor, relabelBlock, SECTION_PRESETS, splitAtLine } from "./sections.js?v=16";
+import { createTideClock, pauseTide, resumeTide, tideBudget, tideLeft } from "./tide.js?v=16";
 import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=16";
 import { interpretHearing } from "./voice.js?v=11";
 import {
@@ -235,8 +241,14 @@ async function boot() {
   document.addEventListener("submit", onSubmit);
   document.addEventListener("change", onChange);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible") stopListening();
-    else void syncSharedBoard();
+    const play = session.play;
+    if (document.visibilityState !== "visible") {
+      stopListening();
+      if (play?.tide) play.tide = pauseTide(play.tide, performance.now());
+    } else {
+      if (play?.tide) play.tide = resumeTide(play.tide, performance.now());
+      void syncSharedBoard();
+    }
   });
   bindPlayViewport();
   if (!location.hash) location.hash = "#/";
@@ -452,12 +464,15 @@ function viewHome() {
   const upNext = upcoming.length ? `
     <p class="kicker">Up next</p>
     <div class="rows" data-testid="up-next">${upcoming.map((slot) => upNextRow(concert, slot)).join("")}</div>` : "";
+  const focus = songs[0];
+  const focusAction = focus ? nextAction(songMap(focus, recallMap(progressOf(session.state), focus), sectionRecord(progressOf(session.state), focus), Date.now()), dueRows(focus, recallMap(progressOf(session.state), focus), Date.now()).length) : null;
   const hero = concert && summary?.total ? `
     <header class="hero" style="${accentStyle(concert)}">
-      <p class="kicker">Next up</p>
-      <h1>${escapeHtml(concert.name)}</h1>
-      <p class="hero-stat" data-testid="home-status">${escapeHtml(concertStatusLine(summary))}</p>
-      <a class="btn btn-hero" href="#/concert/${encodeURIComponent(concert.id)}">Continue</a>
+      <p class="kicker">${focusAction?.due ? `${focusAction.due} due` : "Next up"}</p>
+      <h1>${escapeHtml(focus && focusAction ? focus.title : concert.name)}</h1>
+      <p class="hero-stat" data-testid="home-status">${escapeHtml(focusAction ? focusAction.label : concertStatusLine(summary))}</p>
+      <a class="btn btn-hero" data-testid="home-next" href="${focusAction ? actionHref(focus.id, focusAction) : `#/concert/${encodeURIComponent(concert.id)}`}">${escapeHtml(focusAction ? focusAction.label : "Continue")}</a>
+      <a class="btn btn-text btn-text-on-hero" href="#/concert/${encodeURIComponent(concert.id)}">Concert</a>
       <a class="btn btn-text btn-text-on-hero" href="#/add" data-testid="add-song">Add song</a>
     </header>` : `
     <header class="page-head">
@@ -499,11 +514,13 @@ function upNextRow(concert, slot) {
 }
 
 function songCard(song) {
-  const stats = songStats(progressOf(session.state), song);
+  const progress = progressOf(session.state);
+  const stats = songStats(progress, song);
+  const due = dueRows(song, recallMap(progress, song), Date.now()).length;
   const sample = song.sample ? " · Sample" : "";
-  const detail = stats.linesMastered > 0
-    ? `${stats.linesMastered} of ${stats.lineCount} lines mastered`
-    : `${song.artist}${sample}`;
+  const detail = due
+    ? `${due} due`
+    : (stats.linesMastered > 0 ? `${stats.linesMastered} of ${stats.lineCount} lines mastered` : `${song.artist}${sample}`);
   return `
     <a class="row" href="#/song/${encodeURIComponent(song.id)}" data-testid="song-card">
       <span class="tile tile-song accent-${shellAccent()}" aria-hidden="true">${escapeHtml(initial(song.title))}</span>
@@ -660,32 +677,20 @@ function viewSong() {
   if (!song) return missing("That song is not on this device.", "#/");
   const progress = progressOf(session.state);
   const stats = songStats(progress, song);
-  const plan = chapterPlan(song.lines, song.sections || [], { chapters: stats.chapters || {}, rounds: stats.rounds || {} });
-  const rounds = plan.filter((chapter) => chapter.id === "round");
-  const doneCount = rounds.filter((chapter) => chapter.status === "done").length;
-  const chapters = plan.map((chapter, index) => {
-    const testid = chapter.id === "concert" ? `data-testid="game-concert"` : `data-testid="game-round"`;
-    if (chapter.status === "unavailable") {
-      return `<button class="game" type="button" disabled ${testid}><span>${index + 1} ${escapeHtml(chapter.name)}<small>Not enough lines</small></span></button>`;
-    }
-    if (chapter.status === "locked") {
-      return `<button class="game is-locked" type="button" disabled ${testid}><span class="game-name">${index + 1} ${escapeHtml(chapter.name)}</span><span class="lock-mark">${icon("lock")} Locked</span></button>`;
-    }
-    const mark = chapter.status === "done" ? "Done" : "Open";
-    const href = chapter.id === "concert"
-      ? `#/play/${encodeURIComponent(song.id)}/concert`
-      : `#/play/${encodeURIComponent(song.id)}/round?round=${encodeURIComponent(chapter.roundId)}`;
-    return `
-      <a class="game${chapter.id === "concert" ? " is-final" : ""}" ${testid} href="${href}">
-        <span>${index + 1} ${escapeHtml(chapter.name)}<small>${escapeHtml(chapter.detail)} · ${mark}</small></span>
-      </a>`;
-  }).join("");
+  const recall = recallMap(progress, song);
+  const sections = sectionRecord(progress, song);
+  const blocks = songMap(song, recall, sections, Date.now());
+  const due = dueRows(song, recall, Date.now()).length;
+  const action = nextAction(blocks, due);
+  const best = stats.bestScore ? `${formatScore(stats.bestScore)} best` : "";
   const concerts = concertsForSong(session.concerts, song.title, song.artist);
   const concert = concerts[0];
   const links = concerts.map((item) => `<a class="text-link" href="#/concert/${encodeURIComponent(item.id)}">${escapeHtml(item.name)}</a>`).join("");
-  const progressLine = stats.songMastered
-    ? "Song mastered"
-    : `${doneCount} of ${rounds.length} rounds`;
+  const progressLine = due ? `${due} due` : action.label;
+  const blocksHtml = blocks.map((block) => `
+    <article class="game" data-testid="map-section">
+      <span>${escapeHtml(block.label)}<small>${escapeHtml(block.state)} · level ${block.average}${block.due ? ` · ${block.due} due` : ""}</small></span>
+    </article>`).join("");
   return `
     <section class="screen">
       <header class="hero hero-song" style="${accentStyle(concert)}">
@@ -694,18 +699,19 @@ function viewSong() {
         <p class="hero-stat">${escapeHtml(song.artist)}${song.sample ? " · Sample" : ""}</p>
       </header>
       <div class="meter-block">
-        <p class="sub" data-testid="chapter-progress">${progressLine}</p>
-        <p class="sub" data-testid="song-mastery">${stats.linesMastered} of ${stats.lineCount} lines mastered</p>
+        <p class="sub" data-testid="chapter-progress">${escapeHtml(progressLine)}</p>
+        <p class="sub" data-testid="song-mastery">${stats.linesMastered} of ${stats.lineCount} lines mastered${best ? ` · ${escapeHtml(best)}` : ""}</p>
+        <p class="sub" data-testid="lines-due">${due} due</p>
         ${meter(stats.masteryPercent)}
       </div>
       ${links ? `<p class="sub">On the setlist: ${links}</p>` : ""}
-      <div class="stack">
-        <a class="btn btn-primary" data-testid="start-run" href="#/play/${encodeURIComponent(song.id)}/run?section=1">Run</a>
-        <a class="btn btn-text" data-testid="start-warmup" href="#/play/${encodeURIComponent(song.id)}/warmup?section=1">Warm-up</a>
-      </div>
-      <p class="kicker">Rounds</p>
-      <div class="game-list">${chapters}</div>
-      ${plan.some((chapter) => chapter.status === "locked") ? `<p class="chapter-note" data-testid="chapter-lock-note">Finish the previous round</p>` : ""}
+      <a class="btn btn-primary" data-testid="next-step" href="${actionHref(song.id, action)}">${escapeHtml(action.label)}</a>
+      ${action.kind === "warmup" ? `<a class="btn btn-text" data-testid="skip-to-run" href="${actionHref(song.id, { kind: "run", section: action.section })}">Skip to Run</a>` : ""}
+      <p class="kicker">Sections</p>
+      <div class="game-list" data-testid="song-map">${blocksHtml}</div>
+      <a class="btn btn-text" data-testid="full-run" href="#/play/${encodeURIComponent(song.id)}/full">Full run</a>
+      <a class="btn btn-text" href="#/play/${encodeURIComponent(song.id)}/lines">Build</a>
+      <a class="btn btn-text" href="#/play/${encodeURIComponent(song.id)}/next">Next line</a>
       <div class="dock">
         <a class="btn btn-text" href="#/edit/${encodeURIComponent(song.id)}">Edit lyrics</a>
         <button class="btn btn-text btn-danger" type="button" data-action="ask-delete" data-id="${escapeHtml(song.id)}">Delete song</button>
@@ -1411,6 +1417,7 @@ function viewMe() {
         <input id="import-file" type="file" accept="application/json,.json" hidden>
         <button class="btn btn-text" type="button" data-action="toggle-sound">${state.settings.sound ? "Sound on" : "Sound off"}</button>
         <button class="btn btn-text" type="button" data-action="toggle-sing" data-testid="sing-toggle">${state.settings.sing ? "Singing on" : "Singing off"}</button>
+        <button class="btn btn-text" type="button" data-action="toggle-relaxed" data-testid="relaxed-toggle">${state.settings.relaxed ? "Relaxed on" : "Relaxed off"}</button>
         <p class="fine">Singing stays off until you turn it on. Word tiles are the main way to answer.</p>
         <button class="btn btn-text" type="button" data-action="restore-sample">Restore sample song</button>
         <button class="btn btn-text btn-danger" type="button" data-action="ask-erase">Erase everything on this device</button>
@@ -1727,6 +1734,7 @@ let recallTimer = 0;
 function clearRecallTimer() {
   clearTimeout(recallTimer);
   recallTimer = 0;
+  stopTide();
 }
 
 function recallSong() {
@@ -1738,7 +1746,11 @@ function paintRecallQuestion() {
   const song = recallSong();
   const step = currentStep(play?.run);
   if (!play || !song || !step) return;
-  play.question = buildRecallQuestion(song, step, Math.random, { audit: play.run.audit });
+  play.question = buildRecallQuestion(song, step, Math.random, {
+    audit: play.run.audit,
+    gated: play.mode === "boss"
+  });
+  play.stepStarted = performance.now();
   play.placed = [];
   play.heard = "";
   play.typed = "";
@@ -1788,6 +1800,105 @@ function ensureRun() {
   return true;
 }
 
+function recallShell(song, mode, run, sectionNumber) {
+  return {
+    engine: "recall",
+    key: `${song.id}:${mode}:${sectionNumber || "all"}:${run.steps.length}`,
+    songId: song.id,
+    mode,
+    gameName: mode === "boss" ? "Boss" : mode === "daily" ? "Daily review" : "Run",
+    sectionNumber: sectionNumber || 1,
+    run,
+    question: null,
+    placed: [],
+    answerMode: "tiles",
+    typed: "",
+    heard: "",
+    notice: "",
+    rating: false,
+    flash: false,
+    listening: false,
+    singOn: Boolean(session.state.settings.sing) && !session.state.settings.cantSing,
+    voiceFails: 0,
+    retried: false,
+    lastMiss: "",
+    doneLabel: "Back to song",
+    doneAction: "recall-done",
+    doneHref: ""
+  };
+}
+
+function ensureBoss() {
+  const song = findSong(session.route.songId);
+  if (!song) {
+    go("#/");
+    return false;
+  }
+  const sectionNumber = Math.max(1, Number(session.route.params.section) || 1);
+  const key = `${song.id}:boss:${sectionNumber}`;
+  if (session.play?.key === key && session.play.run?.status === "ask") return true;
+  stopListening();
+  clearRecallTimer();
+  const recall = recallMap(progressOf(session.state), song);
+  const steps = bossSteps(song, sectionNumber, recall);
+  if (!steps.length) {
+    armToast("That section needs more lines.");
+    go(`#/song/${encodeURIComponent(song.id)}`);
+    return false;
+  }
+  const run = startSession({ mode: "boss", steps, hearts: 3, sectionNumber });
+  session.play = { ...recallShell(song, "boss", run, sectionNumber), key };
+  paintRecallQuestion();
+  return true;
+}
+
+function ensureFull() {
+  const song = findSong(session.route.songId);
+  if (!song) {
+    go("#/");
+    return false;
+  }
+  const key = `${song.id}:full`;
+  if (session.play?.key === key && session.play.run?.status === "ask") return true;
+  stopListening();
+  clearRecallTimer();
+  const recall = recallMap(progressOf(session.state), song);
+  const steps = fullSteps(song, recall);
+  if (!steps.length) {
+    armToast("That song needs more lines.");
+    go(`#/song/${encodeURIComponent(song.id)}`);
+    return false;
+  }
+  const run = startSession({ mode: "full", steps, hearts: 3 });
+  session.play = { ...recallShell(song, "full", run, 0), key, gameName: "Full run", times: [] };
+  paintRecallQuestion();
+  return true;
+}
+
+function ensureDaily() {
+  const song = findSong(session.route.songId);
+  if (!song) {
+    go("#/");
+    return false;
+  }
+  const now = Date.now();
+  const recall = recallMap(progressOf(session.state), song);
+  const steps = dailySteps(song, recall, now);
+  if (!steps.length) {
+    armToast("Nothing is due.");
+    go(`#/song/${encodeURIComponent(song.id)}`);
+    return false;
+  }
+  const key = `${song.id}:daily:${steps.map((step) => step.identity).join(",")}`;
+  if (session.play?.key === key) return true;
+  stopListening();
+  clearRecallTimer();
+  const run = startSession({ mode: "daily", steps, hearts: 5 });
+  session.play = { ...recallShell(song, "daily", run, 0), key, gameName: "Daily review" };
+  paintRecallQuestion();
+  return true;
+}
+
 function ensureWarmup() {
   const song = findSong(session.route.songId);
   if (!song) {
@@ -1800,7 +1911,7 @@ function ensureWarmup() {
   stopListening();
   const lines = [];
   const labels = [];
-  const wanted = sectionIndexes(song, sectionNumber);
+  const wanted = linesForSection(song, sectionNumber).map((row) => row.index);
   for (const index of wanted) {
     lines.push(song.lines[index]);
     labels.push(song.sections?.[index] || "Part");
@@ -1851,24 +1962,65 @@ function ensureWarmup() {
   return true;
 }
 
-function sectionIndexes(song, sectionNumber) {
-  const counts = new Map();
-  const indexes = [];
-  let number = 0;
-  let previous = null;
-  song.lines.forEach((line, index) => {
-    const label = song.sections?.[index] || "Part 1";
-    if (label !== previous) {
-      number += 1;
-      previous = label;
+function noteRecallFinish() {
+  const play = session.play;
+  const song = recallSong();
+  if (!play || !song || play.noted) return;
+  if (play.run.status !== "done" && play.run.status !== "lost") return;
+  play.noted = true;
+  const progress = progressOf(session.state);
+  if (play.mode === "run" && play.run.status === "done") {
+    const runs = (sectionRecord(progress, song)[String(play.sectionNumber)]?.runs || 0) + 1;
+    noteSection(song, play.sectionNumber, { runs });
+  }
+  if (play.mode === "boss" && play.run.status === "done") {
+    noteSection(song, play.sectionNumber, { boss: true });
+    addBonusXp(progress, song, 50);
+    const blocks = songMap(song, recallMap(progress, song), sectionRecord(progress, song), Date.now());
+    const action = nextAction(blocks, dueRows(song, recallMap(progress, song), Date.now()).length);
+    play.doneKicker = "Boss cleared";
+    play.doneLabel = "Next section";
+    play.doneHref = actionHref(song.id, action);
+    persist();
+  }
+  if (play.mode === "boss" && play.run.status === "lost" && !play.retried) {
+    play.doneKicker = "Boss";
+    play.doneLabel = "Try again";
+    play.doneAction = "retry-boss";
+  }
+  if (play.mode === "full" && play.run.status === "done") {
+    const accuracy = play.run.answered ? play.run.correct / play.run.answered : 0;
+    const score = Math.round(play.run.xp * accuracy);
+    const times = (play.times || []).map((value) => Math.round(value));
+    const usable = times.length === play.run.steps.length && times.every((value) => value >= 250);
+    recordRun(progress, song, { score, gameId: "full" });
+    if (usable) {
+      saveBestRun(progress, song, { score, xp: play.run.xp, accuracy, times, at: Date.now() });
     }
-    counts.set(index, number);
-  });
-  song.lines.forEach((_, index) => {
-    if (counts.get(index) === sectionNumber) indexes.push(index);
-  });
-  if (!indexes.length) song.lines.forEach((_, index) => indexes.push(index));
-  return indexes;
+    play.doneKicker = "Full run";
+    play.doneLabel = "Share score";
+    play.doneAction = "share-full";
+    play.fullCard = {
+      score,
+      accuracy: Math.round(accuracy * 100),
+      elapsed: times.reduce((sum, value) => sum + value, 0)
+    };
+    persist();
+    markScoresPending(undefined, progress);
+    void syncSharedBoard();
+  }
+  if (play.mode === "daily" && play.run.answered > 0) {
+    finishStreak(progress);
+    play.doneKicker = "Review done";
+    persist();
+  }
+}
+
+function noteSection(song, number, patch) {
+  putSection(progressOf(session.state), song, number, patch);
+  const recall = recallMap(progressOf(session.state), song);
+  if (sectionLearned(song, number, recall)) putSection(progressOf(session.state), song, number, { learned: true });
+  persist();
 }
 
 function viewRecall() {
@@ -1876,7 +2028,48 @@ function viewRecall() {
   play.heartIcon = icon("heart");
   play.closeIcon = icon("close");
   play.micIcon = icon("mic");
+  play.relaxed = Boolean(session.state.settings.relaxed);
   return recallPlayHtml(play);
+}
+
+function stopTide() {
+  const play = session.play;
+  if (play?.tideFrame) cancelAnimationFrame(play.tideFrame);
+  if (play) {
+    play.tideFrame = 0;
+    play.tideToken = "";
+  }
+}
+
+function armTide() {
+  const play = session.play;
+  if (!play || play.engine !== "recall" || play.run?.status !== "ask" || play.rating || play.relaxed) {
+    stopTide();
+    return;
+  }
+  const token = `${play.key}:${play.run.cursor}:${play.run.audit ? 1 : 0}`;
+  if (play.tideToken === token && play.tideFrame) return;
+  stopTide();
+  const budget = tideBudget(play.question?.answer || "", play.question?.level || 0, play.run.combo, {
+    slowdown: play.mode !== "boss"
+  });
+  play.tide = createTideClock(budget, performance.now());
+  play.tideToken = token;
+  const frame = (now) => {
+    if (session.play !== play || play.tideToken !== token) return;
+    if (play.run.status !== "ask") return;
+    const left = tideLeft(play.tide, now);
+    const bar = document.getElementById("tide-bar");
+    if (bar && play.tide.budgetMs) bar.style.transform = `scaleX(${Math.max(0, Math.min(1, left / play.tide.budgetMs))})`;
+    if (left <= 0) {
+      play.tideFrame = 0;
+      play.tideToken = "";
+      recallMiss();
+      return;
+    }
+    play.tideFrame = requestAnimationFrame(frame);
+  };
+  play.tideFrame = requestAnimationFrame(frame);
 }
 
 function storedRecall(id) {
@@ -1900,6 +2093,8 @@ function settleRecall(result) {
   commitRecall(result);
   play.run = result.state;
   play.heard = "";
+  if (result.effect === "lost" || result.effect === "rewind") play.lastMiss = play.question?.answer || play.lastMiss;
+  if (play.run.status === "done") noteRecallFinish();
   if (result.effect === "advance" || result.effect === "done") {
     play.flash = true;
     render();
@@ -1920,6 +2115,7 @@ function settleRecall(result) {
       if (session.play !== play) return;
       play.run = finishReveal(play.run);
       if (play.run.status === "ask") paintRecallQuestion();
+      else noteRecallFinish();
       render();
     }, 1000);
     return;
@@ -1930,6 +2126,10 @@ function settleRecall(result) {
 function recallPass({ sung = false } = {}) {
   const play = session.play;
   const step = currentStep(play.run);
+  if (play.mode === "full") {
+    play.times ||= [];
+    play.times[play.run.cursor] = Math.max(0, Math.round(performance.now() - (play.stepStarted || performance.now())));
+  }
   const result = passRun(play.run, { record: storedRecall(step.identity), sung, now: Date.now() });
   blip("ok", session.state.settings.sound);
   settleRecall(result);
@@ -2114,6 +2314,9 @@ function ensurePlay() {
   const route = session.route;
   if (route.gameId === "run") return ensureRun();
   if (route.gameId === "warmup") return ensureWarmup();
+  if (route.gameId === "boss") return ensureBoss();
+  if (route.gameId === "daily") return ensureDaily();
+  if (route.gameId === "full") return ensureFull();
   const song = findSong(route.songId);
   const game = GAMES.find((item) => item.id === route.gameId);
   if (!song || !game) {
@@ -2551,6 +2754,8 @@ function continueLesson() {
   stopListening();
   if (play.hearts <= 0 || play.index >= play.questions.length - 1) {
     if (play.warmup) {
+      const song = findSong(play.songId);
+      if (song) noteSection(song, play.sectionNumber || 1, { warmed: true });
       go(`#/play/${encodeURIComponent(play.songId)}/run?section=${play.sectionNumber || 1}`);
       return;
     }
@@ -2725,14 +2930,28 @@ async function openShare(card) {
     score: Math.max(0, Math.round(Number(card.score) || 0)),
     streak: Math.max(0, Math.round(Number(card.streak) || 0)),
     playerName: clip(card.playerName || "You", 40),
-    detail: clip(card.detail || "", 80)
+    detail: clip(card.detail || "", 80),
+    accuracy: Number.isFinite(Number(card.accuracy)) ? Math.round(Number(card.accuracy)) : undefined,
+    elapsed: Math.max(0, Math.round(Number(card.elapsed) || 0))
   };
   let url = "";
+  let blob = null;
   try {
-    const blob = await drawShareCard(safe);
+    blob = await drawShareCard(safe);
     if (blob) url = URL.createObjectURL(blob);
   } catch {
     url = "";
+  }
+  if (blob && navigator.share) {
+    const file = new File([blob], "know-the-verse.png", { type: "image/png" });
+    try {
+      if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text: shareText(safe), title: "Know the Verse" });
+        return;
+      }
+    } catch {
+      // The download card stays available when share is dismissed.
+    }
   }
   if (session.shareUrl) URL.revokeObjectURL(session.shareUrl);
   session.shareUrl = url;
@@ -2907,6 +3126,7 @@ function modalHtml() {
 }
 
 function afterRender() {
+  armTide();
   const dialog = document.querySelector("dialog");
   if (dialog && !dialog.open) {
     dialog.showModal();
@@ -3129,13 +3349,44 @@ function onClick(event) {
       session.play.heard = "";
       render();
     }
-  } else if (action === "recall-done") {
+  }   else if (action === "recall-done") {
+    const href = session.play?.doneHref;
     const id = session.play?.songId;
     session.play = null;
-    go(id ? `#/song/${encodeURIComponent(id)}` : "#/");
+    go(href || (id ? `#/song/${encodeURIComponent(id)}` : "#/"));
+  } else if (action === "share-full") {
+    const play = session.play;
+    const song = play && findSong(play.songId);
+    if (song && play.fullCard) {
+      openShare({
+        kind: "song",
+        title: song.title,
+        artist: song.artist,
+        score: play.fullCard.score,
+        accuracy: play.fullCard.accuracy,
+        elapsed: play.fullCard.elapsed,
+        streak: progressOf(session.state).streak?.count || 0,
+        playerName: activePlayer(session.state).name,
+        detail: "Full run"
+      });
+    }
+  } else if (action === "retry-boss") {
+    const play = session.play;
+    if (play?.mode === "boss") {
+      play.retried = true;
+      play.noted = false;
+      play.lastMiss = "";
+      play.run = startSession({ mode: "boss", steps: play.run.steps, hearts: 3, sectionNumber: play.sectionNumber });
+      paintRecallQuestion();
+      render();
+    }
   } else if (action === "toggle-sing") {
     session.state.settings.sing = !session.state.settings.sing;
     if (session.state.settings.sing) session.state.settings.cantSing = false;
+    persist();
+    render();
+  } else if (action === "toggle-relaxed") {
+    session.state.settings.relaxed = !session.state.settings.relaxed;
     persist();
     render();
   } else if (action === "check") {

@@ -22,7 +22,12 @@ export const BOARD_LIMITS = {
   joinPerIp: 10,
   maxDevices: 6,
   maxRounds: 40,
-  maxLines: 80
+  maxLines: 80,
+  maxRunLines: 400,
+  minLineMs: 250,
+  maxLineMs: 60000,
+  maxXpPerLine: 200,
+  runsPerDevice: 8
 };
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -128,9 +133,40 @@ export function snapshotFromProgress(progress) {
   };
 }
 
+export function validateRunPayload(run) {
+  if (run == null) return { ok: true, value: null };
+  if (!run || typeof run !== "object" || Array.isArray(run)) return { ok: false, error: "That run could not be checked." };
+  const lineCount = clampInt(run.lineCount, BOARD_LIMITS.maxRunLines);
+  const times = Array.isArray(run.times) ? run.times : null;
+  if (!lineCount || !times || times.length !== lineCount) return { ok: false, error: "That run could not be checked." };
+  const cleanTimes = [];
+  for (const value of times) {
+    const ms = Math.round(Number(value));
+    if (!Number.isFinite(ms) || ms < BOARD_LIMITS.minLineMs || ms > BOARD_LIMITS.maxLineMs) {
+      return { ok: false, error: "That run could not be checked." };
+    }
+    cleanTimes.push(ms);
+  }
+  const total = cleanTimes.reduce((sum, ms) => sum + ms, 0);
+  const reported = Math.round(Number(run.totalMs) || 0);
+  if (reported && Math.abs(reported - total) > 1500) return { ok: false, error: "That run could not be checked." };
+  const accuracy = Number(run.accuracy);
+  if (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 1) return { ok: false, error: "That run could not be checked." };
+  const xp = Math.round(Number(run.xp));
+  const score = Math.round(Number(run.score));
+  const cap = lineCount * BOARD_LIMITS.maxXpPerLine;
+  if (!Number.isFinite(xp) || !Number.isFinite(score) || xp < 0 || score < 0 || xp > cap || score > cap) {
+    return { ok: false, error: "That run could not be checked." };
+  }
+  if (Math.abs(score - Math.round(xp * accuracy)) > 1) return { ok: false, error: "That run could not be checked." };
+  const songId = songKey(cleanLabel(run.title, 80), cleanLabel(run.artist, 80));
+  if (!songId || songId === "|") return { ok: false, error: "That run could not be checked." };
+  return { ok: true, value: { songId, title: cleanLabel(run.title, 80), artist: cleanLabel(run.artist, 80), score, xp, accuracy, lineCount, times: cleanTimes, totalMs: total } };
+}
+
 export function buildSubmission(progress, profile, library = []) {
   const snapshot = snapshotFromProgress(progress);
-  return {
+  const submission = {
     deviceId: profile?.deviceId || "",
     playerId: profile?.playerId || profile?.deviceId || "",
     name: profile?.name || "",
@@ -146,6 +182,29 @@ export function buildSubmission(progress, profile, library = []) {
     progress: progressSnapshot(progress),
     library: libraryFromSongs(library)
   };
+  const runs = runsFromProgress(progress);
+  if (runs.length) submission.runs = runs;
+  return submission;
+}
+
+export function runsFromProgress(progress) {
+  const runs = [];
+  for (const row of Object.values(progress?.songs || {})) {
+    const run = row?.bestRun;
+    if (!run || !Array.isArray(run.times) || !run.times.length) continue;
+    const checked = validateRunPayload({
+      title: row.title,
+      artist: row.artist,
+      score: run.score,
+      xp: run.xp,
+      accuracy: run.accuracy,
+      lineCount: run.times.length,
+      times: run.times,
+      totalMs: run.times.reduce((sum, value) => sum + value, 0)
+    });
+    if (checked.ok && checked.value) runs.push(checked.value);
+  }
+  return runs;
 }
 
 export function libraryFromSongs(songs) {
@@ -248,10 +307,22 @@ function songsFromPlayer(player) {
       title,
       artist,
       score: clampInt(song.score, BOARD_LIMITS.maxSongScore),
-      xp: clampInt(song.xp, BOARD_LIMITS.maxSongXp)
+      xp: clampInt(song.xp, BOARD_LIMITS.maxSongXp),
+      ghost: cleanGhost(song.ghost)
     });
   }
   return songs;
+}
+
+function cleanGhost(times) {
+  if (!Array.isArray(times) || !times.length || times.length > BOARD_LIMITS.maxRunLines) return null;
+  const clean = [];
+  for (const value of times) {
+    const ms = Math.round(Number(value));
+    if (!Number.isFinite(ms) || ms < BOARD_LIMITS.minLineMs || ms > BOARD_LIMITS.maxLineMs) return null;
+    clean.push(ms);
+  }
+  return clean;
 }
 
 function mergePlayer(prev, incoming, now) {
@@ -259,19 +330,26 @@ function mergePlayer(prev, incoming, now) {
   for (const song of songsFromPlayer(prev)) songs[song.id] = song;
   for (const song of incoming.songs || []) {
     const prior = songs[song.id];
+    const score = Math.max(prior?.score || 0, song.score);
+    const ghost = song.score >= (prior?.score || 0) && song.ghost ? song.ghost : (prior?.ghost || null);
     songs[song.id] = {
       id: song.id,
       title: song.title,
       artist: song.artist,
-      score: Math.max(prior?.score || 0, song.score),
-      xp: Math.max(prior?.xp || 0, song.xp)
+      score,
+      xp: Math.max(prior?.xp || 0, song.xp),
+      ghost
     };
   }
   const kept = Object.values(songs)
     .filter((song) => song.score > 0 || song.xp > 0)
     .sort((a, b) => b.score - a.score || b.xp - a.xp)
     .slice(0, BOARD_LIMITS.maxSongs)
-    .map((song) => [song.id, { title: song.title, artist: song.artist, score: song.score, xp: song.xp }]);
+    .map((song) => {
+      const entry = { title: song.title, artist: song.artist, score: song.score, xp: song.xp };
+      if (song.ghost) entry.ghost = song.ghost;
+      return [song.id, entry];
+    });
   const canonical = validDeviceId(prev?.deviceId)
     ? String(prev.deviceId).toLowerCase()
     : String(incoming.playerId || incoming.deviceId || "").toLowerCase();
@@ -774,11 +852,19 @@ export function boardResponse(players, { deviceId = "", songId = "" } = {}) {
   if (songId) {
     const ranked = rankList(players, (player) => player.songs?.[songId] || null, deviceId);
     const known = songs.find((item) => item.id === songId) || players.map((player) => player.songs?.[songId]).find(Boolean);
+    const ghosts = players
+      .map((player) => {
+        const times = player.songs?.[songId]?.ghost;
+        return times ? { name: player.name, times } : null;
+      })
+      .filter(Boolean)
+      .slice(0, BOARD_LIMITS.top);
     song = {
       id: songId,
       title: known?.title || "",
       artist: known?.artist || "",
-      rows: ranked.slice(0, BOARD_LIMITS.top).map(publicRow)
+      rows: ranked.slice(0, BOARD_LIMITS.top).map(publicRow),
+      ghosts
     };
     songYou = youSummary(ranked);
   }
@@ -854,6 +940,21 @@ export async function handleLeaderboard({ method, searchParams, body, ip, store,
       const blocked = await charge(store, `post:ip:${address || "anon"}`, BOARD_LIMITS.postPerIp, now);
       if (!blocked.ok) return tooMany("post");
       return { status: 400, body: { error: verdict.error } };
+    }
+    const runs = Array.isArray(body?.runs) ? body.runs.slice(0, BOARD_LIMITS.maxSongs) : [];
+    const checkedRuns = [];
+    for (const run of runs) {
+      const checked = validateRunPayload(run);
+      if (!checked.ok) return { status: 400, body: { error: checked.error } };
+      if (checked.value) checkedRuns.push(checked.value);
+    }
+    if (checkedRuns.length) {
+      const paced = await charge(store, `run:${verdict.value.deviceId}`, BOARD_LIMITS.runsPerDevice, now);
+      if (!paced.ok) return tooMany("post");
+      for (const run of checkedRuns) {
+        const song = verdict.value.songs.find((item) => item.id === run.songId);
+        if (song && run.score >= song.score) song.ghost = run.times;
+      }
     }
     const deviceBlocked = await charge(store, `post:${verdict.value.deviceId}`, BOARD_LIMITS.postPerDevice, now);
     if (!deviceBlocked.ok) return tooMany("post");

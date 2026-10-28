@@ -36,7 +36,7 @@ function wordTiles(line, extras, rng) {
   return { tiles, solution: real.map((tile) => tile.id) };
 }
 
-export function buildRecallQuestion(song, step, rng = Math.random, { audit = false } = {}) {
+export function buildRecallQuestion(song, step, rng = Math.random, { audit = false, gated = false } = {}) {
   const lines = song?.lines || [];
   const index = step.index;
   const level = audit ? 1 : step.level;
@@ -56,13 +56,14 @@ export function buildRecallQuestion(song, step, rng = Math.random, { audit = fal
     lineNumber: ident.lineNumber || index + 1,
     sectionNumber: ident.sectionNumber || step.sectionNumber || 1,
     cold,
+    coldOpen: Boolean(step.coldOpen) && !audit,
     format: "tiles",
     choices: [],
     tiles: [],
     solution: [],
     hint: "",
     allowType: level !== 2,
-    allowShow: !audit && level === 3,
+    allowShow: !audit && !gated && level === 3,
     allowSing: !audit && level >= 3
   };
   if (level <= 0) {
@@ -100,6 +101,10 @@ export function buildRecallQuestion(song, step, rng = Math.random, { audit = fal
 export function recallPrompt(question) {
   if (!question) return "";
   if (question.audit) return "Quick check";
+  if (question.coldOpen) {
+    const name = String(question.sectionLabel || "section").replace(/\s+\d+$/, "");
+    return `Which line opens the ${name}?`;
+  }
   if (question.cold || question.level >= 4) {
     const name = question.sectionLabel || "Line";
     return `${name}, line ${question.lineNumber}`;
@@ -172,7 +177,7 @@ export function passRun(state, { record = null, sung = false, now = Date.now(), 
   const step = currentStep(state);
   if (!step || state.status !== "ask") return { state, record: null, effect: "none" };
   const asked = levelAsked ?? step.level;
-  const xp = recallXp({ level: asked, sung });
+  const xp = recallXp({ level: asked, combo: state.combo, sung });
   const next = advance({
     ...state,
     combo: state.combo + 1,
@@ -215,18 +220,52 @@ export function singRetry(state, record, now = Date.now()) {
   return missRun({ ...state, singTries: tries }, { record, now });
 }
 
+function rewindCursor(state) {
+  if (state.mode === "boss") return 0;
+  if (state.mode === "full") {
+    let cursor = 0;
+    for (let index = 0; index <= state.cursor && index < state.steps.length; index += 1) {
+      if (state.steps[index].sectionStart) cursor = index;
+    }
+    return cursor;
+  }
+  return state.checkpoint;
+}
+
 export function finishReveal(state) {
   if (state.status !== "reveal") return state;
   if (state.hearts <= 0) return { ...state, status: "lost", reveal: "" };
   return parkCheckpoint({
     ...state,
-    cursor: state.checkpoint,
+    cursor: rewindCursor(state),
     status: "ask",
     reveal: "",
     audit: false,
     combo: 0,
     singTries: 0
   });
+}
+
+export function startSession({ mode = "run", steps = [], hearts = 5, sectionNumber = 1 } = {}) {
+  return {
+    mode,
+    sectionNumber,
+    fresh: false,
+    steps,
+    cursor: 0,
+    checkpoint: 0,
+    hearts,
+    maxHearts: hearts,
+    combo: 0,
+    xp: 0,
+    correct: 0,
+    answered: 0,
+    status: steps.length ? "ask" : "done",
+    reveal: "",
+    audit: false,
+    singTries: 0,
+    notice: ""
+  };
 }
 
 export function armAudit(state, rng = Math.random) {

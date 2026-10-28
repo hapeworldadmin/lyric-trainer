@@ -96,7 +96,8 @@ function hydrate(raw) {
     sing: raw.settings?.sing === true,
     singWarned: Boolean(raw.settings?.singWarned),
     cantSing: Boolean(raw.settings?.cantSing),
-    answerMode: raw.settings?.answerMode === "type" ? "type" : "tiles"
+    answerMode: raw.settings?.answerMode === "type" ? "type" : "tiles",
+    relaxed: raw.settings?.relaxed === true
   };
   return state;
 }
@@ -171,7 +172,7 @@ function cleanSongProgress(row) {
   }
   const bestByGame = {};
   for (const [game, value] of Object.entries(row.bestByGame || {})) {
-    if (!["fill", "order", "next", "letters", "concert", "lines", "fade", "think"].includes(game)) continue;
+    if (!["fill", "order", "next", "letters", "concert", "lines", "fade", "think", "round", "run", "boss", "daily", "full"].includes(game)) continue;
     bestByGame[game] = Math.max(0, Math.round(Number(value) || 0));
   }
   const rounds = {};
@@ -211,7 +212,23 @@ function cleanSongProgress(row) {
     lastPlayedAt: typeof row.lastPlayedAt === "string" ? row.lastPlayedAt : null,
     imported,
     recall,
-    sectionState
+    sectionState,
+    bestRun: cleanBestRun(row.bestRun)
+  };
+}
+
+function cleanBestRun(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  if (Object.values(raw).some((value) => typeof value === "string")) return null;
+  const times = Array.isArray(raw.times) ? raw.times.slice(0, 400).map((value) => Math.round(Number(value) || 0)) : [];
+  if (!times.length || times.some((value) => value < 0 || value > 120000)) return null;
+  return {
+    score: Math.max(0, Math.round(Number(raw.score) || 0)),
+    xp: Math.max(0, Math.round(Number(raw.xp) || 0)),
+    accuracy: Math.max(0, Math.min(1, Number(raw.accuracy) || 0)),
+    lineCount: times.length,
+    times,
+    at: Math.max(0, Math.round(Number(raw.at) || 0))
   };
 }
 

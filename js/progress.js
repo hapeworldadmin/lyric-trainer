@@ -3,7 +3,7 @@ import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js?v=16";
 
 export const MASTER_CORRECT = 2;
 export const ROUND_MISTAKE_LIMIT = 1;
-const GAMES = new Set(["fill", "order", "next", "letters", "concert", "lines", "fade", "think", "round"]);
+const GAMES = new Set(["fill", "order", "next", "letters", "concert", "lines", "fade", "think", "round", "run", "boss", "daily", "full"]);
 const CHAPTER_IDS = ["fade", "think", "lines", "next", "concert"];
 
 export function emptyProgress() {
@@ -182,6 +182,40 @@ export function retitleSongProgress(progressByPlayer, oldTitle, oldArtist, newTi
     progress.songs[newKey] = dest ? mergeRows(dest, moved, newTitle, newArtist) : moved;
     delete progress.songs[oldKey];
   }
+}
+
+export function sectionRecord(progress, song) {
+  const key = songKey(song.title, song.artist);
+  return progress?.songs?.[key]?.sectionState || {};
+}
+
+export function saveBestRun(progress, song, run) {
+  const row = ensureRow(progress, song);
+  const score = Math.max(0, Math.round(Number(run?.score) || 0));
+  if (!row.bestRun || score >= (row.bestRun.score || 0)) {
+    row.bestRun = {
+      score,
+      xp: Math.max(0, Math.round(Number(run?.xp) || 0)),
+      accuracy: Math.max(0, Math.min(1, Number(run?.accuracy) || 0)),
+      lineCount: Array.isArray(run?.times) ? run.times.length : 0,
+      times: Array.isArray(run?.times) ? run.times.map((value) => Math.max(0, Math.round(Number(value) || 0))) : [],
+      at: Math.max(0, Math.round(Number(run?.at) || Date.now()))
+    };
+  }
+  return row.bestRun;
+}
+
+export function putSection(progress, song, number, patch) {
+  const row = ensureRow(progress, song);
+  const id = String(number);
+  const prev = row.sectionState[id] || { boss: false, learned: false, runs: 0, warmed: false };
+  row.sectionState[id] = {
+    boss: patch.boss != null ? Boolean(patch.boss) : Boolean(prev.boss),
+    learned: patch.learned != null ? Boolean(patch.learned) : Boolean(prev.learned),
+    runs: patch.runs != null ? Math.max(0, Math.round(Number(patch.runs) || 0)) : (prev.runs || 0),
+    warmed: patch.warmed != null ? Boolean(patch.warmed) : Boolean(prev.warmed)
+  };
+  return row.sectionState[id];
 }
 
 export function recallMap(progress, song) {
