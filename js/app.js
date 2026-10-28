@@ -83,7 +83,7 @@ import {
   typedCorrect
 } from "./recall.js?v=16";
 import { recallPlayHtml } from "./recall-ui.js?v=16";
-import { completenessWarnings, mergeWithNext, prepareImportedText, presetFor, relabelBlock, SECTION_PRESETS, splitAtLine } from "./sections.js?v=16";
+import { completenessWarnings, mergeWithNext, prepareImportedText, presetFor, renameBlock, splitSection } from "./sections.js?v=16";
 import { createTideClock, pauseTide, resumeTide, tideBudget, tideLeft } from "./tide.js?v=16";
 import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=16";
 import { interpretHearing } from "./voice.js?v=11";
@@ -636,15 +636,15 @@ function viewPaste() {
     <label class="field">Artist
       <input id="artist" data-testid="artist" type="text" maxlength="120" autocomplete="off" value="${escapeHtml(form.artist || "")}">
     </label>` : "";
-  const warnings = preview ? completenessWarnings(preview.lines, preview.sections) : [];
-  const warningHtml = warnings.length ? `<p class="hint" data-testid="paste-warning">${escapeHtml(warnings.join(" "))}</p>` : "";
+  const hints = preview ? completenessWarnings(preview.lines, preview.sections) : [];
+  const hintHtml = hints.length ? `<p class="fine" data-testid="paste-warning">${escapeHtml(hints.join(" "))}</p>` : "";
   const body = preview ? `
     <p class="sub" data-testid="lyric-preview">${preview.lines.length} lines</p>
-    ${warningHtml}
+    ${hintHtml}
     <div class="preview-edit" data-testid="section-preview">${previewEditorHtml(preview)}</div>
     ${metaFields}
     <button class="btn btn-primary" type="button" data-action="confirm-paste" data-testid="looks-right">Looks right</button>
-    <button class="btn btn-text" type="button" data-action="retry-paste" data-testid="try-again">Try again</button>
+    <button class="text-link try-again" type="button" data-action="retry-paste" data-testid="try-again">Try again</button>
   ` : `
     ${known ? `<a class="btn btn-secondary" id="find-lyrics" data-testid="find-lyrics" href="${escapeHtml(find)}" target="_blank" rel="noopener noreferrer">Find lyrics</a>` : ""}
     <button class="btn btn-primary" type="button" data-action="paste-clipboard" data-testid="paste-clipboard">${known ? "Paste lyrics" : "Paste"}</button>
@@ -678,22 +678,47 @@ function viewPaste() {
   `;
 }
 
+function previewBlocks(preview) {
+  const lines = preview.lines || [];
+  const sections = preview.sections || [];
+  const blocks = [];
+  let start = 0;
+  for (let index = 1; index <= lines.length; index += 1) {
+    const label = sections[start] || "Verse 1";
+    if (index === lines.length || (sections[index] || "Verse 1") !== label) {
+      blocks.push({ start, label, lines: lines.slice(start, index) });
+      start = index;
+    }
+  }
+  return blocks;
+}
+
 function previewEditorHtml(preview) {
-  return (preview.lines || []).map((line, index) => {
-    const label = preview.sections?.[index] || "Part";
-    const options = SECTION_PRESETS.map((preset) => {
-      const selected = presetFor(label).toLowerCase() === preset.toLowerCase() ? " selected" : "";
-      return `<option value="${escapeHtml(preset)}"${selected}>${escapeHtml(preset)}</option>`;
+  const blocks = previewBlocks(preview);
+  const open = session.form?.openBlock;
+  const names = ["Verse", "Chorus", "Pre-Chorus", "Bridge", "Intro", "Outro"];
+  return blocks.map((block, blockIndex) => {
+    const expanded = open === block.start;
+    const choices = names.map((name) => {
+      const selected = presetFor(block.label).toLowerCase() === name.toLowerCase() ? " selected" : "";
+      return `<option value="${escapeHtml(name)}"${selected}>${escapeHtml(name)}</option>`;
     }).join("");
-    return `
-      <div class="preview-row">
-        <label class="preview-label">
-          <span class="sr-only">Section</span>
-          <select data-action="relabel-line" data-index="${index}" aria-label="Section for line ${index + 1}">${options}</select>
+    const editor = expanded ? `
+      <div class="section-editor">
+        <label class="preview-label">Rename
+          <select data-action="rename-section" data-index="${block.start}" aria-label="Rename ${escapeHtml(block.label)}">${choices}</select>
         </label>
-        <span>${escapeHtml(line)}</span>
-        <button class="btn btn-text btn-small" type="button" data-action="merge-line" data-index="${index}">Merge</button>
-        <button class="btn btn-text btn-small" type="button" data-action="split-line" data-index="${index}">Split</button>
+        ${blockIndex < blocks.length - 1 ? `<button class="btn btn-text btn-small" type="button" data-action="merge-section" data-index="${block.start}">Merge</button>` : ""}
+        ${block.lines.length > 1 ? `<button class="btn btn-text btn-small" type="button" data-action="split-section" data-index="${block.start}">Split</button>` : ""}
+      </div>` : "";
+    const body = block.lines.map((line) => `<p class="preview-line">${escapeHtml(line)}</p>`).join("");
+    return `
+      <div class="section-block">
+        <button class="section-hit" type="button" data-action="toggle-section" data-index="${block.start}" data-testid="section-block" aria-expanded="${expanded ? "true" : "false"}">
+          <span class="kicker">${escapeHtml(block.label)}</span>
+          ${body}
+        </button>
+        ${editor}
       </div>`;
   }).join("");
 }
@@ -3395,17 +3420,23 @@ function onClick(event) {
     captureForm();
     applyPastedText(session.form?.raw || "");
   } else if (action === "confirm-paste") confirmPaste();
-  else if (action === "merge-line") {
+  else if (action === "toggle-section") {
+    const index = Number(el.dataset.index);
+    if (session.form) {
+      session.form.openBlock = session.form.openBlock === index ? null : index;
+      render();
+    }
+  } else if (action === "merge-section") {
     const index = Number(el.dataset.index);
     if (session.form?.preview) {
       session.form.preview.sections = mergeWithNext(session.form.preview.sections, index);
       session.form.forceEdit = false;
       render();
     }
-  } else if (action === "split-line") {
+  } else if (action === "split-section") {
     const index = Number(el.dataset.index);
     if (session.form?.preview) {
-      session.form.preview.sections = splitAtLine(session.form.preview.sections, index);
+      session.form.preview.sections = splitSection(session.form.preview.sections, index);
       session.form.forceEdit = false;
       render();
     }
@@ -3774,9 +3805,10 @@ function onChange(event) {
     event.target.value = "";
     if (file) void scanLyricImage(file);
   }
-  if (event.target.dataset.action === "relabel-line" && session.form?.preview) {
+  if (event.target.dataset.action === "rename-section" && session.form?.preview) {
     const index = Number(event.target.dataset.index);
-    session.form.preview.sections = relabelBlock(session.form.preview.sections, index, event.target.value);
+    session.form.preview.sections = renameBlock(session.form.preview.sections, index, event.target.value);
+    session.form.openBlock = index;
     session.form.forceEdit = false;
     render();
   }

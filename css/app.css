@@ -372,29 +372,40 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
 .preview { display: grid; gap: 8px; margin: 8px 0 16px; }
 .preview-edit {
   display: grid;
-  gap: 8px;
-  max-height: 46dvh;
-  overflow: auto;
-  margin: 8px 0;
+  margin: 8px 0 16px;
 }
-.preview-row {
+.section-block { border-top: 1px solid var(--line); }
+.section-block:first-child { border-top: 0; }
+.section-hit {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 12px 0 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+.section-hit .kicker { margin: 0 0 8px; }
+.preview-line {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.section-editor {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--line);
+  padding: 0 0 12px;
 }
-.preview-row > span {
-  flex: 1 1 140px;
-  min-width: 0;
-  font-size: 15px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.preview-row .btn { width: auto; min-height: 44px; }
+.section-editor .btn { width: auto; min-height: 44px; }
+.preview-label { min-width: 120px; }
 .preview-label select {
   width: 100%;
   min-height: 44px;
@@ -403,7 +414,15 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
   background: var(--surface);
   color: var(--ink);
   font: inherit;
-  font-size: 14px;
+  font-size: 16px;
+}
+.try-again {
+  display: block;
+  width: 100%;
+  margin: 4px 0 8px;
+  text-align: center;
+  color: var(--muted);
+  font-weight: 600;
 }
 .preview span {
   font-size: 16px;
@@ -430,6 +449,7 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
   padding: 0;
   text-decoration: none;
 }
+button.try-again { color: var(--muted); }
 
 .meter-block { margin: 8px 0 16px; }
 .meter-block p { margin: 0 0 8px; }

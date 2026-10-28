@@ -492,7 +492,7 @@ function labelsFromBreaks(lines, breaks) {
 function fixedPartLabels(lines) {
   const sections = [];
   chunkSizes(lines.length).forEach((size, index) => {
-    for (let step = 0; step < size; step += 1) sections.push(`Part ${index + 1}`);
+    for (let step = 0; step < size; step += 1) sections.push(`Verse ${index + 1}`);
   });
   return sections;
 }

@@ -3,12 +3,13 @@ import test from "node:test";
 import { comboMultiplier, recallXp } from "../js/memory.js";
 import { createTideClock, pauseTide, resumeTide, tideBudget, tideLeft } from "../js/tide.js";
 
-test("the tide shrinks about 4 percent per correct answer and floors at 60 percent", () => {
+test("the tide shrinks about 2 percent per correct answer and floors at 80 percent", () => {
   const start = tideBudget("one two three four", 2, 0);
   const once = tideBudget("one two three four", 2, 1);
-  assert.ok(Math.abs(once / start - 0.96) < 0.001);
+  assert.ok(start >= 8000);
+  assert.ok(Math.abs(once / start - 0.98) < 0.001);
   const floor = tideBudget("one two three four", 2, 80);
-  assert.ok(Math.abs(floor - start * 0.6) < 1);
+  assert.ok(Math.abs(floor - start * 0.8) < 1);
   assert.ok(tideBudget("one two three four", 4, 0) > tideBudget("one two three four", 0, 0));
   assert.equal(tideBudget("one two three four", 3, 10, { slowdown: false }), tideBudget("one two three four", 3, 0, { slowdown: false }));
 });

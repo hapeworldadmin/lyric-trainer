@@ -48,12 +48,39 @@ function blockRepeats(lines, sections) {
 }
 
 export function completenessWarnings(lines, sections = []) {
-  const warnings = [];
+  const hints = [];
   const list = lines || [];
-  if (list.length < 8) warnings.push("Fewer than 8 lines.");
+  if (list.length > 0 && list.length < 8) hints.push("Fewer than 8 lines.");
   const chorusSpans = canonicalSections(list, sections).filter((span) => /^chorus\b/i.test(span.label) && !span.repeat);
-  if (!blockRepeats(list, sections) && chorusSpans.length < 2) warnings.push("No repeated chorus.");
-  return warnings;
+  if (list.length >= 16 && !blockRepeats(list, sections) && chorusSpans.length < 2) hints.push("No repeated chorus.");
+  return hints;
+}
+
+export function renameBlock(sections, index, choice) {
+  const name = String(choice || "").trim();
+  if (!name) return (sections || []).slice();
+  if (/^verse$/i.test(name)) {
+    const current = sections?.[index] || "";
+    if (/^verse\s+\d+$/i.test(current)) return (sections || []).slice();
+    const used = new Set(sections || []);
+    let number = 1;
+    while (used.has(`Verse ${number}`)) number += 1;
+    return relabelBlock(sections, index, `Verse ${number}`);
+  }
+  return relabelBlock(sections, index, name);
+}
+
+export function splitSection(sections, index) {
+  const next = (sections || []).slice();
+  if (!next.length || index < 0 || index >= next.length) return next;
+  const label = next[index];
+  let start = index;
+  while (start > 0 && next[start - 1] === label) start -= 1;
+  let end = index;
+  while (end + 1 < next.length && next[end + 1] === label) end += 1;
+  if (end - start < 1) return next;
+  const at = start + Math.ceil((end - start + 1) / 2);
+  return splitAtLine(next, at);
 }
 
 export function stripLrcTimestamps(raw) {

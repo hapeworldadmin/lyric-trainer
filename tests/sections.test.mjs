@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { analyzePaste, sectionName } from "../js/parse.js";
-import { completenessWarnings, mergeWithNext, prepareImportedText, relabelBlock, splitAtLine } from "../js/sections.js";
+import { completenessWarnings, mergeWithNext, prepareImportedText, relabelBlock, renameBlock, splitAtLine, splitSection } from "../js/sections.js";
 
 test("section tags drop a trailing artist", () => {
   assert.equal(sectionName("[Chorus: House Band]"), "Chorus");
@@ -24,10 +24,20 @@ test("preview can relabel, merge, and split, and short songs warn", () => {
   const split = splitAtLine(["Verse", "Verse", "Verse"], 2);
   assert.equal(split[0], "Verse");
   assert.notEqual(split[2], "Verse");
-  const warnings = completenessWarnings(["alpha one two", "beta three four"], ["Verse", "Verse"]);
-  assert.equal(warnings.some((item) => /8 lines/.test(item)), true);
-  assert.equal(warnings.some((item) => /chorus/i.test(item)), true);
+  const short = completenessWarnings(["alpha one two", "beta three four"], ["Verse", "Verse"]);
+  assert.equal(short.some((item) => /8 lines/.test(item)), true);
+  assert.equal(short.some((item) => /chorus/i.test(item)), false);
+  const nine = Array.from({ length: 9 }, (_, index) => `unique marble line ${index} extra`);
+  const parsed = analyzePaste(nine.join("\n"), { detectTitle: false });
+  assert.deepEqual(parsed.sections, [
+    "Verse 1", "Verse 1", "Verse 1", "Verse 1",
+    "Verse 2", "Verse 2", "Verse 2", "Verse 2", "Verse 2"
+  ]);
+  const long = Array.from({ length: 16 }, (_, index) => `unique marble line ${index} extra`);
+  assert.equal(completenessWarnings(long, long.map(() => "Verse 1")).some((item) => /chorus/i.test(item)), true);
   const chorus = ["one two three", "four five six", "hook line stays", "hook line stays"];
   const sections = ["Verse", "Verse", "Chorus", "Chorus"];
   assert.equal(completenessWarnings([...chorus, ...chorus], [...sections, ...sections]).some((item) => /chorus/i.test(item)), false);
+  assert.equal(renameBlock(["Verse 1", "Verse 1", "Chorus"], 0, "Chorus")[0], "Chorus");
+  assert.deepEqual(splitSection(["Verse 1", "Verse 1", "Verse 1", "Verse 1"], 0).slice(0, 2), ["Verse 1", "Verse 1"]);
 });

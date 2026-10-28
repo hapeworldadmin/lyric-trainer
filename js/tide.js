@@ -5,10 +5,10 @@ const SCALE = [0.72, 0.86, 1, 1.22, 1.38];
 export function tideBudget(line, level = 0, correctStreak = 0, { slowdown = true } = {}) {
   const words = wordCount(line);
   const scale = SCALE[Math.max(0, Math.min(4, level))] || 1;
-  const base = Math.min(22000, Math.max(4000, (2.2 + words * 0.55) * 1000 * scale));
+  const base = Math.min(44000, Math.max(8000, (2.2 + words * 0.55) * 2000 * scale));
   if (!slowdown) return base;
-  const shrunk = base * (0.96 ** Math.max(0, correctStreak));
-  return Math.max(base * 0.6, shrunk);
+  const shrunk = base * (0.98 ** Math.max(0, correctStreak));
+  return Math.max(base * 0.8, shrunk);
 }
 
 export function createTideClock(budgetMs, now) {
