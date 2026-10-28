@@ -25,6 +25,7 @@ import {
   singingMatch,
   studyFrame
 } from "./games.js?v=14";
+import { paceAt, paceLabel } from "./ghost.js?v=16";
 import { editSummary } from "./identity.js?v=16";
 import { actionHref, bossSteps, dailySteps, dueRows, fullSteps, linesForSection, nextAction, sectionLearned, songMap } from "./map.js?v=16";
 import { homeScreenCopy, requestPersistentStorage } from "./install.js?v=16";
@@ -32,7 +33,9 @@ import { recognizeImage } from "./ocr.js?v=16";
 import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=16";
 import {
   addBonusXp,
+  applyBackupRecords,
   applyLineEdit,
+  backupRecords,
   buildExport,
   emptyProgress,
   finishStreak,
@@ -89,7 +92,9 @@ import {
   boardScreen,
   createDeviceCode,
   ensureBoardDevice,
+  backupProgress,
   fetchBoard,
+  restoreProgress,
   joinDevice,
   libraryFromSongs,
   loadBoardProfile,
@@ -99,7 +104,7 @@ import {
   saveBoardName,
   saveBoardProfile,
   snapshotFromProgress
-} from "./board.js?v=15";
+} from "./board.js?v=16";
 
 const session = {
   state: null,
@@ -218,10 +223,54 @@ function armToast(message) {
   }, 2800);
 }
 
+function registerShell() {
+  if (!navigator.serviceWorker) return;
+  navigator.serviceWorker.register("./sw.js").then((registration) => {
+    registration.addEventListener("updatefound", () => {
+      const worker = registration.installing;
+      worker?.addEventListener("statechange", () => {
+        if (worker.state === "installed" && navigator.serviceWorker.controller) {
+          session.updateReady = worker;
+          if (session.route?.name === "home") render();
+        }
+      });
+    });
+  }).catch(() => {});
+}
+
+async function runBackup() {
+  const profile = ensureBoardDevice();
+  if (!profile.name) {
+    armToast("Save a name first.");
+    return;
+  }
+  const result = await backupProgress({ profile, records: backupRecords(progressOf(session.state)) });
+  armToast(result.ok ? "Progress backed up." : (result.error || "The backup did not save."));
+  render();
+}
+
+async function runRestore() {
+  const profile = ensureBoardDevice();
+  if (!profile.name) {
+    armToast("Save a name first.");
+    return;
+  }
+  const result = await restoreProgress({ profile });
+  if (!result.ok) {
+    armToast(result.error || "The backup did not load.");
+    return;
+  }
+  const changed = applyBackupRecords(progressOf(session.state), session.state.songs, result.records);
+  if (changed) persist();
+  armToast(changed ? "Progress restored." : "Nothing new to restore.");
+  render();
+}
+
 async function boot() {
   session.state = loadState();
   persist();
   void requestPersistentStorage();
+  registerShell();
   try {
     const response = await fetch(new URL("../concerts.json", import.meta.url));
     if (!response.ok) throw new Error("missing");
@@ -486,6 +535,11 @@ function viewHome() {
       <p>No songs on this device yet.</p>
       <button class="btn btn-text" type="button" data-action="restore-sample">Restore the sample song</button>
     </div>`;
+  const update = session.updateReady ? `
+    <div class="banner" data-testid="update-ready">
+      <p>Update available</p>
+      <button class="btn btn-secondary" type="button" data-action="apply-update">Update</button>
+    </div>` : "";
   const install = session.state.settings?.installPrompted ? "" : `
     <div class="banner" data-testid="install-prompt">
       <p>${escapeHtml(homeScreenCopy())}</p>
@@ -493,6 +547,7 @@ function viewHome() {
     </div>`;
   return `
     <section class="screen">
+      ${update}
       ${install}
       ${hero}
       ${upNext}
@@ -1418,6 +1473,9 @@ function viewMe() {
         <button class="btn btn-text" type="button" data-action="toggle-sound">${state.settings.sound ? "Sound on" : "Sound off"}</button>
         <button class="btn btn-text" type="button" data-action="toggle-sing" data-testid="sing-toggle">${state.settings.sing ? "Singing on" : "Singing off"}</button>
         <button class="btn btn-text" type="button" data-action="toggle-relaxed" data-testid="relaxed-toggle">${state.settings.relaxed ? "Relaxed on" : "Relaxed off"}</button>
+        <button class="btn btn-text" type="button" data-action="backup-progress" data-testid="backup-progress">Back up progress</button>
+        <button class="btn btn-text" type="button" data-action="restore-backup" data-testid="restore-backup">Restore backup</button>
+        <p class="fine">Backup is progress only. Lyrics stay on this device.</p>
         <p class="fine">Singing stays off until you turn it on. Word tiles are the main way to answer.</p>
         <button class="btn btn-text" type="button" data-action="restore-sample">Restore sample song</button>
         <button class="btn btn-text btn-danger" type="button" data-action="ask-erase">Erase everything on this device</button>
@@ -1870,7 +1928,17 @@ function ensureFull() {
     return false;
   }
   const run = startSession({ mode: "full", steps, hearts: 3 });
-  session.play = { ...recallShell(song, "full", run, 0), key, gameName: "Full run", times: [] };
+  const saved = progressOf(session.state).songs?.[songKey(song.title, song.artist)]?.bestRun;
+  session.play = {
+    ...recallShell(song, "full", run, 0),
+    key,
+    gameName: "Full run",
+    times: [],
+    bestTimes: saved?.times || [],
+    ghostTimes: saved?.times || [],
+    ghostName: saved?.times?.length ? "My best" : "",
+    racingLeader: false
+  };
   paintRecallQuestion();
   return true;
 }
@@ -2023,12 +2091,47 @@ function noteSection(song, number, patch) {
   persist();
 }
 
+async function raceLeader() {
+  const play = session.play;
+  const song = recallSong();
+  if (!play || !song || play.mode !== "full") return;
+  try {
+    const profile = loadBoardProfile();
+    const body = await fetchBoard({ deviceId: profile.deviceId, songId: songKey(song.title, song.artist) });
+    const ghosts = body?.song?.ghosts || [];
+    const other = ghosts.find((ghost) => ghost?.name && ghost.name !== profile.name && ghost.times?.length) || ghosts.find((ghost) => ghost?.times?.length);
+    if (!other?.times?.length) {
+      play.notice = "No ghost yet.";
+      render();
+      return;
+    }
+    play.ghostTimes = other.times;
+    play.ghostName = other.name || "Leader";
+    play.racingLeader = true;
+    play.notice = `Racing ${play.ghostName}.`;
+    render();
+  } catch {
+    if (session.play === play) {
+      play.notice = "No ghost yet.";
+      render();
+    }
+  }
+}
+
 function viewRecall() {
   const play = session.play;
   play.heartIcon = icon("heart");
   play.closeIcon = icon("close");
   play.micIcon = icon("mic");
   play.relaxed = Boolean(session.state.settings.relaxed);
+  if (play.mode === "full" && play.ghostTimes?.length) {
+    const gap = paceAt(play.times || [], play.ghostTimes);
+    play.paceLabel = paceLabel(gap);
+    play.paceAhead = gap == null ? true : gap >= 0;
+    const span = 4000;
+    play.paceScale = gap == null ? 0.5 : Math.max(0.08, Math.min(1, 0.5 + gap / span));
+  } else play.paceLabel = "";
+  play.ghostOffer = play.mode === "full" && play.run?.status === "ask" && !play.racingLeader;
   return recallPlayHtml(play);
 }
 
@@ -3354,6 +3457,8 @@ function onClick(event) {
     const id = session.play?.songId;
     session.play = null;
     go(href || (id ? `#/song/${encodeURIComponent(id)}` : "#/"));
+  } else if (action === "race-leader") {
+    void raceLeader();
   } else if (action === "share-full") {
     const play = session.play;
     const song = play && findSong(play.songId);
@@ -3385,6 +3490,14 @@ function onClick(event) {
     if (session.state.settings.sing) session.state.settings.cantSing = false;
     persist();
     render();
+  } else if (action === "backup-progress") {
+    void runBackup();
+  } else if (action === "restore-backup") {
+    void runRestore();
+  } else if (action === "apply-update") {
+    session.updateReady?.postMessage({ type: "apply" });
+    session.updateReady = null;
+    window.location.reload();
   } else if (action === "toggle-relaxed") {
     session.state.settings.relaxed = !session.state.settings.relaxed;
     persist();

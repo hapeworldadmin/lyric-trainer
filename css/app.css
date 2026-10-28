@@ -565,6 +565,14 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
 }
 .target-blank:empty { height: 0.85em; }
 .key-hint { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+  .play-screen.is-shake { animation: none; }
+}
 @media (hover: hover) and (pointer: fine) {
   .key-hint {
     display: inline-flex;
@@ -594,6 +602,26 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
   transform-origin: left center;
   transform: scaleX(1);
 }
+.pace {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.pace-track {
+  height: 6px;
+  margin: 0 0 16px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.pace-track > span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  background: var(--violet);
+}
+.pace-track > span.is-behind { background: var(--bad); }
 .recall-answer { min-height: 168px; }
 .recall-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .recall-tools .btn { width: auto; min-height: 44px; }

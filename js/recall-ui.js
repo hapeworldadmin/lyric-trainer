@@ -47,6 +47,8 @@ export function recallPlayHtml(play) {
           </div>
         </div>
         ${play.relaxed ? "" : `<div class="tide" data-testid="tide" role="progressbar" aria-label="Time left" aria-valuemin="0" aria-valuemax="100"><span id="tide-bar"></span></div>`}
+        ${play.paceLabel ? `<p class="pace" data-testid="pace">${escapeHtml(play.paceLabel)}</p><div class="pace-track" aria-hidden="true"><span class="${play.paceAhead ? "is-ahead" : "is-behind"}" style="transform:scaleX(${play.paceScale || 0.5})"></span></div>` : ""}
+        ${play.ghostOffer ? `<button class="btn btn-text" type="button" data-action="race-leader" data-testid="race-leader">Race the leader</button>` : ""}
         <div class="play-body recall-body">
           ${previous}
           ${cold ? "" : `<p class="q-label" data-testid="question">${escapeHtml(label)}</p>`}

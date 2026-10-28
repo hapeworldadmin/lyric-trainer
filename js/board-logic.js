@@ -23,6 +23,7 @@ export const BOARD_LIMITS = {
   maxDevices: 6,
   maxRounds: 40,
   maxLines: 80,
+  maxRecall: 400,
   maxRunLines: 400,
   minLineMs: 250,
   maxLineMs: 60000,
@@ -225,13 +226,15 @@ export function progressSnapshot(progress) {
     const title = cleanLabel(row.title, 80);
     const artist = cleanLabel(row.artist, 80);
     if (!title || !artist) continue;
-    songs[songKey(title, artist)] = {
+    const entry = {
       title,
       artist,
       rounds: row.rounds,
       chapters: row.chapters,
       lineStats: row.lineStats
     };
+    if (row.recall && typeof row.recall === "object") entry.recall = row.recall;
+    songs[songKey(title, artist)] = entry;
   }
   return sanitizeProgress({
     totalXp: progress?.totalXp || 0,
@@ -465,8 +468,61 @@ function mergeLearning(prev, incoming) {
     artist: incoming?.artist || prev?.artist || "",
     rounds,
     chapters,
-    lineStats
+    lineStats,
+    recall: mergeRecallRecords(prev?.recall, incoming?.recall)
   };
+}
+
+function sanitizeRecall(raw) {
+  const recall = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return recall;
+  const pattern = /^[\p{L}\p{N}| ]{1,180}#\d{1,4}\.\d{1,4}\.[0-9a-f]{4}$/u;
+  for (const [id, stat] of Object.entries(raw).slice(0, BOARD_LIMITS.maxRecall)) {
+    if (!pattern.test(id) || !stat || typeof stat !== "object" || Array.isArray(stat)) continue;
+    if (Object.values(stat).some((value) => typeof value === "string")) continue;
+    const level = clampInt(stat.level, 4);
+    const misses = clampInt(stat.misses, 10000);
+    const due = clampInt(stat.due, 9e15);
+    const lastPass = clampInt(stat.lastPass, 9e15);
+    if (!level && !misses && !due && !lastPass && !stat.learned) continue;
+    recall[id] = {
+      level,
+      due,
+      misses,
+      lastPass,
+      ladder: clampInt(stat.ladder, 4),
+      learned: Boolean(stat.learned),
+      hardPass: clampInt(stat.hardPass, 9e15)
+    };
+  }
+  return recall;
+}
+
+function mergeRecallRecords(prev, incoming) {
+  const next = sanitizeRecall(prev);
+  for (const [id, stat] of Object.entries(sanitizeRecall(incoming))) {
+    const prior = next[id];
+    if (!prior || (stat.lastPass || 0) >= (prior.lastPass || 0)) next[id] = stat;
+  }
+  return next;
+}
+
+export function sanitizeBackup(body) {
+  const songs = {};
+  const source = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+  for (const [key, row] of Object.entries(source).slice(0, BOARD_LIMITS.maxSongs)) {
+    const title = cleanLabel(key.split("|")[0], 80);
+    const artist = cleanLabel(key.split("|").slice(1).join("|"), 80);
+    if (!title && !artist) continue;
+    const recall = sanitizeRecall(row);
+    if (!Object.keys(recall).length) continue;
+    const slim = {};
+    for (const [id, stat] of Object.entries(recall)) {
+      slim[id] = { level: stat.level, due: stat.due, misses: stat.misses };
+    }
+    songs[songKey(title, artist) || key] = slim;
+  }
+  return songs;
 }
 
 export function sanitizeProgress(body) {
@@ -505,8 +561,11 @@ export function sanitizeProgress(body) {
       if (correct <= 0 && seen <= 0) continue;
       lineStats[key] = { correct, seen };
     }
-    if (!Object.keys(rounds).length && !Object.keys(chapters).length && !Object.keys(lineStats).length) continue;
-    songs[id] = { title, artist, rounds, chapters, lineStats };
+    const recall = sanitizeRecall(row.recall);
+    if (!Object.keys(rounds).length && !Object.keys(chapters).length && !Object.keys(lineStats).length && !Object.keys(recall).length) continue;
+    const entry = { title, artist, rounds, chapters, lineStats };
+    if (Object.keys(recall).length) entry.recall = recall;
+    songs[id] = entry;
   }
   const streak = sanitizeStreak(body.streak);
   const totalXp = clampInt(body.totalXp, BOARD_LIMITS.maxSongXp * BOARD_LIMITS.maxSongs);
@@ -548,13 +607,15 @@ function progressForLibrary(player, ids) {
   const songs = {};
   for (const [id, row] of Object.entries(player?.progress?.songs || {})) {
     if (!wanted.has(id)) continue;
-    songs[id] = {
+    const entry = {
       title: row.title,
       artist: row.artist,
       rounds: row.rounds || {},
       chapters: row.chapters || {},
       lineStats: row.lineStats || {}
     };
+    if (row.recall && Object.keys(row.recall).length) entry.recall = row.recall;
+    songs[id] = entry;
   }
   const scores = [];
   for (const [id, song] of Object.entries(player?.songs || {})) {
@@ -618,7 +679,8 @@ export function applySharedProgress(progress, payload, library) {
       artist: current.artist,
       rounds: current.rounds || {},
       chapters: current.chapters || {},
-      lineStats: current.lineStats || {}
+      lineStats: current.lineStats || {},
+      recall: current.recall || {}
     }, incoming);
     progress.songs[slot.localId] = {
       ...current,
@@ -626,7 +688,8 @@ export function applySharedProgress(progress, payload, library) {
       artist: slot.artist,
       rounds: learning.rounds,
       chapters: learning.chapters,
-      lineStats: learning.lineStats
+      lineStats: learning.lineStats,
+      recall: learning.recall || {}
     };
   }
   for (const song of payload.scores || []) {
@@ -908,6 +971,23 @@ async function charge(store, bucket, limit, now, windowMs = BOARD_LIMITS.windowM
   return decision;
 }
 
+async function handleBackup({ body, store, now }) {
+  if (!validDeviceId(body?.deviceId)) return { status: 400, body: { error: "That device is not valid." } };
+  const paced = await charge(store, `backup:${String(body.deviceId).toLowerCase()}`, 30, now);
+  if (!paced.ok) return tooMany("post");
+  const records = sanitizeBackup(body?.records);
+  await store.set(`b:${String(body.deviceId).toLowerCase()}`, { records, at: now });
+  return { status: 200, body: { ok: true } };
+}
+
+async function handleRestore({ body, store, now }) {
+  if (!validDeviceId(body?.deviceId)) return { status: 400, body: { error: "That device is not valid." } };
+  const paced = await charge(store, `restore:${String(body.deviceId).toLowerCase()}`, 30, now);
+  if (!paced.ok) return tooMany("get");
+  const saved = await store.get(`b:${String(body.deviceId).toLowerCase()}`);
+  return { status: 200, body: { records: saved?.records || {} } };
+}
+
 function tooMany(kind) {
   const error = kind === "get"
     ? "The board is busy. Try again later."
@@ -931,6 +1011,8 @@ export async function handleLeaderboard({ method, searchParams, body, ip, store,
   const address = clientIp(ip);
   if (verb === "POST") {
     const action = String(body?.action || "").toLowerCase();
+    if (action === "backup") return handleBackup({ body, store, now });
+    if (action === "restore") return handleRestore({ body, store, now });
     if (action === "link") return handleLink({ body, ip: address, store, now });
     if (action === "join") return handleJoin({ body, ip: address, store, now });
     if (action === "pull") return handlePull({ body, ip: address, store, now });

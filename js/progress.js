@@ -218,6 +218,50 @@ export function putSection(progress, song, number, patch) {
   return row.sectionState[id];
 }
 
+export function backupRecords(progress) {
+  const records = {};
+  for (const [key, row] of Object.entries(progress?.songs || {})) {
+    const slim = {};
+    for (const [id, stat] of Object.entries(row?.recall || {})) {
+      if (!isLineIdentity(id) || !stat || typeof stat !== "object") continue;
+      slim[id] = {
+        level: Math.max(0, Math.min(4, Math.round(Number(stat.level) || 0))),
+        due: Math.max(0, Math.round(Number(stat.due) || 0)),
+        misses: Math.max(0, Math.round(Number(stat.misses) || 0))
+      };
+    }
+    if (Object.keys(slim).length) records[key] = slim;
+  }
+  return records;
+}
+
+export function applyBackupRecords(progress, songs, records) {
+  let changed = 0;
+  for (const song of songs || []) {
+    const key = songKey(song.title, song.artist);
+    const incoming = records?.[key];
+    if (!incoming || typeof incoming !== "object") continue;
+    const known = new Set(identitiesForSong(song).filter((row) => !row.repeat).map((row) => row.id));
+    for (const [id, stat] of Object.entries(incoming)) {
+      if (!known.has(id) || !stat || typeof stat !== "object") continue;
+      if (Object.values(stat).some((value) => typeof value === "string")) continue;
+      const row = ensureRow(progress, song);
+      if (row.recall?.[id]?.lastPass) continue;
+      row.recall[id] = {
+        level: Math.max(0, Math.min(4, Math.round(Number(stat.level) || 0))),
+        due: Math.max(0, Math.round(Number(stat.due) || 0)),
+        misses: Math.max(0, Math.round(Number(stat.misses) || 0)),
+        lastPass: 0,
+        ladder: 0,
+        learned: false,
+        hardPass: 0
+      };
+      changed += 1;
+    }
+  }
+  return changed;
+}
+
 export function recallMap(progress, song) {
   const key = songKey(song.title, song.artist);
   return progress?.songs?.[key]?.recall || {};
