@@ -12,7 +12,17 @@ export function shareText(card) {
   const artist = String(card.artist || "").trim();
   const by = artist ? ` by ${artist}` : "";
   const detail = card.detail ? ` (${card.detail})` : "";
-  return `${playerName} scored ${score} on "${title}"${by}${detail}. ${tail}`;
+  const accuracy = Number.isFinite(Number(card.accuracy)) ? ` ${Math.round(Number(card.accuracy))}% correct.` : "";
+  const elapsed = Math.round(Number(card.elapsed) || 0);
+  const time = elapsed > 0 ? ` ${formatElapsed(elapsed)}.` : "";
+  return `${playerName} scored ${score} on "${title}"${by}${detail}.${accuracy}${time} ${tail}`;
+}
+
+function formatElapsed(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return minutes ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }
 
 export function drawShareCard(card) {
@@ -56,6 +66,9 @@ export function drawShareCard(card) {
   }
   const streak = Math.max(0, Math.round(Number(card.streak) || 0));
   const bits = [`${streak}-day streak`, card.playerName || "You"];
+  if (Number.isFinite(Number(card.accuracy))) bits.unshift(`${Math.round(Number(card.accuracy))}%`);
+  const elapsed = Math.round(Number(card.elapsed) || 0);
+  if (elapsed > 0) bits.unshift(formatElapsed(elapsed));
   if (card.detail && card.kind === "concert") bits.unshift(card.detail);
   ctx.fillText(bits.join("   ·   "), 96, 960);
 

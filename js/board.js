@@ -315,3 +315,36 @@ export async function fetchBoard({ deviceId, songId = "", fetchImpl = callBoard 
   }
   return response.json();
 }
+
+export async function backupProgress({ profile, records, fetchImpl = callBoard }) {
+  if (!validDeviceId(profile?.deviceId)) return { ok: false, error: "Save a name first." };
+  try {
+    const response = await fetchImpl(BOARD_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ action: "backup", deviceId: profile.deviceId, records }),
+      cache: "no-store"
+    });
+    if (!response.ok) return { ok: false, error: "The backup did not save." };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Offline. Try when you are connected." };
+  }
+}
+
+export async function restoreProgress({ profile, fetchImpl = callBoard }) {
+  if (!validDeviceId(profile?.deviceId)) return { ok: false, error: "Save a name first." };
+  try {
+    const response = await fetchImpl(BOARD_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ action: "restore", deviceId: profile.deviceId }),
+      cache: "no-store"
+    });
+    if (!response.ok) return { ok: false, error: "The backup did not load." };
+    const body = await response.json();
+    return { ok: true, records: body?.records || {} };
+  } catch {
+    return { ok: false, error: "Offline. Try when you are connected." };
+  }
+}

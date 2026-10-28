@@ -2,7 +2,7 @@ import { bestSongMatch, concertsForSong } from "./concerts.js?v=11";
 import { songStats } from "./progress.js?v=12";
 import { clip, safeConcertId, songKey } from "./text.js?v=9";
 
-const GAMES = new Set(["fill", "order", "next", "letters", "concert", "lines", "fade", "think", "round"]);
+const GAMES = new Set(["fill", "order", "next", "letters", "concert", "lines", "fade", "think", "round", "run", "boss", "daily", "full"]);
 export const REMOTE_SCORE_KEYS = ["player_name", "concert", "song_title", "artist", "score"];
 
 export function sanitizeRun(entry) {

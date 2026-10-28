@@ -42,6 +42,10 @@ test("the repo does not bundle real lyric-site hosts or the sample lines outside
         assert.equal(text.includes(line), false, `${relative} contains a bundled lyric line`);
       }
     }
+    if (relative === "sw.js") {
+      assert.equal(/https?:\/\//.test(text), false, "the offline shell stays on this site");
+      continue;
+    }
     if (relative.endsWith(".js") || relative.endsWith(".mjs") || relative.endsWith(".html")) {
       assert.equal(text.includes("XMLHttp" + "Request"), false, relative);
       const fetches = text.match(/fetch\s*\(/g) || [];

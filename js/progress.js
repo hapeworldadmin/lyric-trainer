@@ -1,8 +1,9 @@
-import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js?v=10";
+import { editSummary, identitiesForSong, isLineIdentity, remapRecallKeys } from "./identity.js?v=16";
+import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js?v=16";
 
 export const MASTER_CORRECT = 2;
 export const ROUND_MISTAKE_LIMIT = 1;
-const GAMES = new Set(["fill", "order", "next", "letters", "concert", "lines", "fade", "think", "round"]);
+const GAMES = new Set(["fill", "order", "next", "letters", "concert", "lines", "fade", "think", "round", "run", "boss", "daily", "full"]);
 const CHAPTER_IDS = ["fade", "think", "lines", "next", "concert"];
 
 export function emptyProgress() {
@@ -49,6 +50,8 @@ function ensureRow(progress, song) {
   row.lineStats ||= {};
   row.rounds ||= {};
   row.chapters ||= {};
+  row.recall ||= {};
+  row.sectionState ||= {};
   return row;
 }
 
@@ -190,10 +193,142 @@ export function retitleSongProgress(progressByPlayer, oldTitle, oldArtist, newTi
       prev.artist = newArtist;
       continue;
     }
+    const moved = { ...prev, title: newTitle, artist: newArtist, recall: remapRecallKeys(prev.recall, oldTitle, oldArtist, newTitle, newArtist) };
     const dest = progress.songs[newKey];
-    progress.songs[newKey] = dest ? mergeRows(dest, prev, newTitle, newArtist) : { ...prev, title: newTitle, artist: newArtist };
+    progress.songs[newKey] = dest ? mergeRows(dest, moved, newTitle, newArtist) : moved;
     delete progress.songs[oldKey];
   }
+}
+
+export function sectionRecord(progress, song) {
+  const key = songKey(song.title, song.artist);
+  return progress?.songs?.[key]?.sectionState || {};
+}
+
+export function saveBestRun(progress, song, run) {
+  const row = ensureRow(progress, song);
+  const score = Math.max(0, Math.round(Number(run?.score) || 0));
+  if (!row.bestRun || score >= (row.bestRun.score || 0)) {
+    row.bestRun = {
+      score,
+      xp: Math.max(0, Math.round(Number(run?.xp) || 0)),
+      accuracy: Math.max(0, Math.min(1, Number(run?.accuracy) || 0)),
+      lineCount: Array.isArray(run?.times) ? run.times.length : 0,
+      times: Array.isArray(run?.times) ? run.times.map((value) => Math.max(0, Math.round(Number(value) || 0))) : [],
+      at: Math.max(0, Math.round(Number(run?.at) || Date.now()))
+    };
+  }
+  return row.bestRun;
+}
+
+export function putSection(progress, song, number, patch) {
+  const row = ensureRow(progress, song);
+  const id = String(number);
+  const prev = row.sectionState[id] || { boss: false, learned: false, runs: 0, warmed: false };
+  row.sectionState[id] = {
+    boss: patch.boss != null ? Boolean(patch.boss) : Boolean(prev.boss),
+    learned: patch.learned != null ? Boolean(patch.learned) : Boolean(prev.learned),
+    runs: patch.runs != null ? Math.max(0, Math.round(Number(patch.runs) || 0)) : (prev.runs || 0),
+    warmed: patch.warmed != null ? Boolean(patch.warmed) : Boolean(prev.warmed)
+  };
+  return row.sectionState[id];
+}
+
+export function backupRecords(progress) {
+  const records = {};
+  for (const [key, row] of Object.entries(progress?.songs || {})) {
+    const slim = {};
+    for (const [id, stat] of Object.entries(row?.recall || {})) {
+      if (!isLineIdentity(id) || !stat || typeof stat !== "object") continue;
+      slim[id] = {
+        level: Math.max(0, Math.min(4, Math.round(Number(stat.level) || 0))),
+        due: Math.max(0, Math.round(Number(stat.due) || 0)),
+        misses: Math.max(0, Math.round(Number(stat.misses) || 0))
+      };
+    }
+    if (Object.keys(slim).length) records[key] = slim;
+  }
+  return records;
+}
+
+export function applyBackupRecords(progress, songs, records) {
+  let changed = 0;
+  for (const song of songs || []) {
+    const key = songKey(song.title, song.artist);
+    const incoming = records?.[key];
+    if (!incoming || typeof incoming !== "object") continue;
+    const known = new Set(identitiesForSong(song).filter((row) => !row.repeat).map((row) => row.id));
+    for (const [id, stat] of Object.entries(incoming)) {
+      if (!known.has(id) || !stat || typeof stat !== "object") continue;
+      if (Object.values(stat).some((value) => typeof value === "string")) continue;
+      const row = ensureRow(progress, song);
+      if (row.recall?.[id]?.lastPass) continue;
+      row.recall[id] = {
+        level: Math.max(0, Math.min(4, Math.round(Number(stat.level) || 0))),
+        due: Math.max(0, Math.round(Number(stat.due) || 0)),
+        misses: Math.max(0, Math.round(Number(stat.misses) || 0)),
+        lastPass: 0,
+        ladder: 0,
+        learned: false,
+        hardPass: 0
+      };
+      changed += 1;
+    }
+  }
+  return changed;
+}
+
+export function recallMap(progress, song) {
+  const key = songKey(song.title, song.artist);
+  return progress?.songs?.[key]?.recall || {};
+}
+
+export function putRecall(progress, song, id, record) {
+  if (!isLineIdentity(id) || !record || typeof record !== "object") return null;
+  const row = ensureRow(progress, song);
+  row.recall[id] = {
+    level: Math.max(0, Math.min(4, Math.round(Number(record.level) || 0))),
+    due: Math.max(0, Math.round(Number(record.due) || 0)),
+    misses: Math.max(0, Math.round(Number(record.misses) || 0)),
+    lastPass: Math.max(0, Math.round(Number(record.lastPass) || 0)),
+    ladder: Math.max(0, Math.min(4, Math.round(Number(record.ladder) || 0))),
+    learned: Boolean(record.learned),
+    hardPass: Math.max(0, Math.round(Number(record.hardPass) || 0))
+  };
+  row.lastPlayedAt = new Date().toISOString();
+  return row.recall[id];
+}
+
+export function applyLineEdit(progressByPlayer, beforeSong, afterSong) {
+  const summary = editSummary(beforeSong, afterSong);
+  const key = songKey(afterSong.title, afterSong.artist);
+  const keep = new Set(summary.keptIds);
+  const afterIds = identitiesForSong(afterSong).filter((item) => !item.repeat);
+  const keptText = new Set();
+  for (const item of afterIds) {
+    if (keep.has(item.id)) keptText.add(lineKey(afterSong.lines[item.index]));
+  }
+  for (const progress of Object.values(progressByPlayer || {})) {
+    const row = progress?.songs?.[key];
+    if (!row) continue;
+    const recall = {};
+    for (const [id, stat] of Object.entries(row.recall || {})) {
+      if (keep.has(id)) recall[id] = stat;
+    }
+    row.recall = recall;
+    row.lineStats ||= {};
+    for (const id of Object.keys(row.lineStats)) {
+      if (!keptText.has(id)) delete row.lineStats[id];
+    }
+    row.sectionState ||= {};
+    for (const number of summary.lostSections) {
+      const slot = row.sectionState[String(number)];
+      if (!slot) continue;
+      slot.boss = false;
+      slot.learned = false;
+    }
+  }
+  return summary;
 }
 
 export function resetLineMasteryIfChanged(progressByPlayer, title, artist, previousLines, nextLines) {
@@ -234,8 +369,19 @@ function mergeRows(a, b, title, artist) {
     chapters: { ...(b.chapters || {}), ...(a.chapters || {}) },
     plays: (a.plays || 0) + (b.plays || 0),
     lastPlayedAt: [a.lastPlayedAt, b.lastPlayedAt].filter(Boolean).sort().at(-1) || null,
-    imported: a.imported || b.imported || null
+    imported: a.imported || b.imported || null,
+    recall: mergeRecall(a.recall, b.recall),
+    sectionState: { ...(b.sectionState || {}), ...(a.sectionState || {}) }
   };
+}
+
+function mergeRecall(left, right) {
+  const next = { ...(right || {}) };
+  for (const [id, stat] of Object.entries(left || {})) {
+    const other = next[id];
+    if (!other || (stat?.lastPass || 0) >= (other.lastPass || 0)) next[id] = stat;
+  }
+  return next;
 }
 
 export function buildExport(state) {
@@ -264,6 +410,10 @@ export function buildExport(state) {
         exported.linesMastered = songRow.imported.linesMastered;
         exported.lineCount = songRow.imported.lineCount;
       }
+      const recall = exportRecall(songRow.recall);
+      if (Object.keys(recall).length) exported.recall = recall;
+      const sectionState = exportSectionState(songRow.sectionState);
+      if (Object.keys(sectionState).length) exported.sectionState = sectionState;
       songs[key] = exported;
     }
     progress[playerId] = {
@@ -276,7 +426,7 @@ export function buildExport(state) {
     };
   }
   return {
-    version: 1,
+    version: 2,
     kind: "lyric-trainer-progress",
     exportedAt: new Date().toISOString(),
     note: "Scores only. No lyrics.",
@@ -302,7 +452,7 @@ function publicRun(entry) {
 }
 
 export function mergeImport(state, data) {
-  if (!data || data.kind !== "lyric-trainer-progress" || data.version !== 1) {
+  if (!data || data.kind !== "lyric-trainer-progress" || (data.version !== 1 && data.version !== 2)) {
     throw new Error("Choose a Know the Verse progress file.");
   }
   const importedPlayers = Array.isArray(data.players) ? data.players : [];
@@ -336,7 +486,9 @@ export function mergeImport(state, data) {
         lineStats: {},
         plays: 0,
         lastPlayedAt: null,
-        imported: null
+        imported: null,
+        recall: {},
+        sectionState: {}
       };
       prev.title = clip(row.title, 120);
       prev.artist = clip(row.artist, 120);
@@ -348,6 +500,8 @@ export function mergeImport(state, data) {
         if (!GAMES.has(game)) continue;
         prev.bestByGame[game] = Math.max(prev.bestByGame[game] || 0, Math.round(Number(value) || 0));
       }
+      prev.recall = mergeRecall(prev.recall, importRecall(row.recall));
+      prev.sectionState = { ...(prev.sectionState || {}), ...importSectionState(row.sectionState) };
       if (row.masteryPercent != null && row.linesMastered != null && row.lineCount != null) {
         prev.imported = {
           masteryPercent: clamp(row.masteryPercent, 0, 100),
@@ -399,4 +553,51 @@ function normalizeStreak(streak) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Math.round(Number(value) || 0)));
+}
+
+function exportRecall(recall) {
+  const next = {};
+  for (const [id, stat] of Object.entries(recall || {})) {
+    if (!isLineIdentity(id) || !stat || typeof stat !== "object") continue;
+    next[id] = {
+      level: clamp(stat.level, 0, 4),
+      due: Math.max(0, Math.round(Number(stat.due) || 0)),
+      misses: Math.max(0, Math.round(Number(stat.misses) || 0)),
+      lastPass: Math.max(0, Math.round(Number(stat.lastPass) || 0)),
+      ladder: clamp(stat.ladder, 0, 4),
+      learned: Boolean(stat.learned),
+      hardPass: Math.max(0, Math.round(Number(stat.hardPass) || 0))
+    };
+  }
+  return next;
+}
+
+function exportSectionState(sectionState) {
+  const next = {};
+  for (const [id, stat] of Object.entries(sectionState || {})) {
+    if (!/^\d{1,4}$/.test(id) || !stat || typeof stat !== "object") continue;
+    next[id] = {
+      boss: Boolean(stat.boss),
+      learned: Boolean(stat.learned),
+      runs: Math.max(0, Math.round(Number(stat.runs) || 0)),
+      warmed: Boolean(stat.warmed)
+    };
+  }
+  return next;
+}
+
+function importRecall(recall) {
+  const next = {};
+  if (!recall || typeof recall !== "object" || Array.isArray(recall)) return next;
+  for (const [id, stat] of Object.entries(recall)) {
+    if (!isLineIdentity(id) || !stat || typeof stat !== "object" || Array.isArray(stat)) continue;
+    if (Object.values(stat).some((value) => typeof value === "string")) continue;
+    next[id] = exportRecall({ [id]: stat })[id];
+  }
+  return next;
+}
+
+function importSectionState(sectionState) {
+  if (!sectionState || typeof sectionState !== "object" || Array.isArray(sectionState)) return {};
+  return exportSectionState(sectionState);
 }

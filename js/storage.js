@@ -1,7 +1,9 @@
+import { isLineIdentity } from "./identity.js?v=16";
 import { SAMPLE_SONG } from "./sample.js?v=9";
-import { emptyProgress } from "./progress.js?v=12";
+import { emptyProgress } from "./progress.js?v=16";
+import { migrateState } from "./schema.js?v=16";
 import { sanitizeRun } from "./scores.js?v=11";
-import { clip, songKey, uid } from "./text.js?v=9";
+import { clip, songKey, uid } from "./text.js?v=16";
 
 export const STORAGE_KEY = "lyric-trainer-v1";
 
@@ -47,13 +49,13 @@ export function sampleRecord() {
 
 export function loadState() {
   const store = memory();
-  if (!store) return seedSample(blankState());
+  if (!store) return migrateState(seedSample(blankState()));
   try {
     const raw = store.getItem(STORAGE_KEY);
     if (!raw) return seedSample(blankState());
-    return seedSample(hydrate(JSON.parse(raw)));
+    return migrateState(seedSample(hydrate(JSON.parse(raw))));
   } catch {
-    return seedSample(blankState());
+    return migrateState(seedSample(blankState()));
   }
 }
 
@@ -86,9 +88,16 @@ function hydrate(raw) {
     state.progress[player.id] = cleanProgress(raw.progress?.[player.id]);
   }
   state.leaderboard = Array.isArray(raw.leaderboard) ? raw.leaderboard.slice(-300).map(sanitizeRun) : [];
+  state.schemaVersion = Number(raw.schemaVersion) || 1;
   state.settings = {
     sound: raw.settings?.sound !== false,
-    privacySeen: Boolean(raw.settings?.privacySeen)
+    privacySeen: Boolean(raw.settings?.privacySeen),
+    installPrompted: Boolean(raw.settings?.installPrompted),
+    sing: raw.settings?.sing === true,
+    singWarned: Boolean(raw.settings?.singWarned),
+    cantSing: Boolean(raw.settings?.cantSing),
+    answerMode: raw.settings?.answerMode === "type" ? "type" : "tiles",
+    relaxed: raw.settings?.relaxed === true
   };
   return state;
 }
@@ -163,7 +172,7 @@ function cleanSongProgress(row) {
   }
   const bestByGame = {};
   for (const [game, value] of Object.entries(row.bestByGame || {})) {
-    if (!["fill", "order", "next", "letters", "concert", "lines", "fade", "think"].includes(game)) continue;
+    if (!["fill", "order", "next", "letters", "concert", "lines", "fade", "think", "round", "run", "boss", "daily", "full"].includes(game)) continue;
     bestByGame[game] = Math.max(0, Math.round(Number(value) || 0));
   }
   const rounds = {};
@@ -180,6 +189,8 @@ function cleanSongProgress(row) {
   for (const id of ["fade", "think", "lines", "next", "concert"]) {
     if (row.chapters?.[id]) chapters[id] = true;
   }
+  const recall = cleanRecall(row.recall);
+  const sectionState = cleanSectionState(row.sectionState);
   let imported = null;
   if (row.imported && typeof row.imported === "object") {
     imported = {
@@ -199,6 +210,73 @@ function cleanSongProgress(row) {
     chapters,
     plays: Math.max(0, Math.round(Number(row.plays) || 0)),
     lastPlayedAt: typeof row.lastPlayedAt === "string" ? row.lastPlayedAt : null,
-    imported
+    imported,
+    recall,
+    sectionState,
+    bestRun: cleanBestRun(row.bestRun)
   };
+}
+
+function cleanBestRun(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  if (Object.values(raw).some((value) => typeof value === "string")) return null;
+  const times = Array.isArray(raw.times) ? raw.times.slice(0, 400).map((value) => Math.round(Number(value) || 0)) : [];
+  if (!times.length || times.some((value) => value < 0 || value > 120000)) return null;
+  return {
+    score: Math.max(0, Math.round(Number(raw.score) || 0)),
+    xp: Math.max(0, Math.round(Number(raw.xp) || 0)),
+    accuracy: Math.max(0, Math.min(1, Number(raw.accuracy) || 0)),
+    lineCount: times.length,
+    times,
+    at: Math.max(0, Math.round(Number(raw.at) || 0))
+  };
+}
+
+function cleanRecall(raw) {
+  const recall = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return recall;
+  for (const [key, stat] of Object.entries(raw)) {
+    if (!isLineIdentity(key) || !stat || typeof stat !== "object" || Array.isArray(stat)) continue;
+    const record = cleanRecallRecord(stat);
+    if (record) recall[key] = record;
+  }
+  return recall;
+}
+
+function cleanRecallRecord(stat) {
+  for (const value of Object.values(stat)) {
+    if (typeof value === "string") return null;
+  }
+  return {
+    level: clampLevel(stat.level),
+    due: stamp(stat.due),
+    misses: Math.max(0, Math.round(Number(stat.misses) || 0)),
+    lastPass: stamp(stat.lastPass),
+    ladder: Math.max(0, Math.min(4, Math.round(Number(stat.ladder) || 0))),
+    learned: Boolean(stat.learned),
+    hardPass: stamp(stat.hardPass)
+  };
+}
+
+function cleanSectionState(raw) {
+  const sections = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return sections;
+  for (const [key, stat] of Object.entries(raw)) {
+    if (!/^\d{1,4}$/.test(key) || !stat || typeof stat !== "object" || Array.isArray(stat)) continue;
+    sections[key] = {
+      boss: Boolean(stat.boss),
+      learned: Boolean(stat.learned),
+      runs: Math.max(0, Math.round(Number(stat.runs) || 0)),
+      warmed: Boolean(stat.warmed)
+    };
+  }
+  return sections;
+}
+
+function clampLevel(value) {
+  return Math.max(0, Math.min(4, Math.round(Number(value) || 0)));
+}
+
+function stamp(value) {
+  return Math.max(0, Math.round(Number(value) || 0));
 }

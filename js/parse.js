@@ -28,7 +28,8 @@ const JUNK_LINE = [
   /^album\s*:/i,
   /^listen$/i,
   /^people also search for\b/i,
-  /^feedback$/i
+  /^feedback$/i,
+  /^[-–—]?\s*\d{1,4}\s*[-–—.]?$/
 ];
 
 function decodePaste(raw) {
@@ -46,7 +47,7 @@ function decodePaste(raw) {
 }
 
 function stripTimestamp(line) {
-  return line.replace(/^[\[(]?\d{1,2}:\d{2}(?:[:.]\d{2})?[\])]?\s+/, "").trim();
+  return line.replace(/^(?:[\[(]?\d{1,2}:\d{2}(?:[:.]\d{2})?[\])]?\s*)+/, "").trim();
 }
 
 function stripInlineSections(line) {
@@ -64,12 +65,14 @@ export function sectionName(line) {
   const text = String(line ?? "").trim();
   if (!isSectionLine(text)) return "";
   if (/^\(?\s*(?:x\s?\d+|\d+\s?x|repeat|repeats)\s*\)?$/i.test(text)) return "";
-  const name = text
+  let name = text
     .replace(/^[\[(]\s*/, "")
     .replace(/\s*[\])]$/, "")
     .replace(/:$/, "")
     .replace(/\s+/g, " ")
     .trim();
+  const tagged = name.match(new RegExp(`^(${SECTION_WORD}(?:\\s+\\d+)?)\\s*[:\\-–—]\\s+\\S`, "i"));
+  if (tagged) name = tagged[1].replace(/\s+/g, " ").trim();
   return name.slice(0, 40);
 }
 
@@ -489,7 +492,7 @@ function labelsFromBreaks(lines, breaks) {
 function fixedPartLabels(lines) {
   const sections = [];
   chunkSizes(lines.length).forEach((size, index) => {
-    for (let step = 0; step < size; step += 1) sections.push(`Part ${index + 1}`);
+    for (let step = 0; step < size; step += 1) sections.push(`Verse ${index + 1}`);
   });
   return sections;
 }

@@ -190,9 +190,9 @@ test("a paste with no repetition falls back to four-line parts", () => {
   const parsed = analyzePaste(lines.join("\n"), { detectTitle: false });
   assert.deepEqual(parsed.lines, lines);
   assert.deepEqual(parsed.sections, [
-    "Part 1", "Part 1", "Part 1", "Part 1",
-    "Part 2", "Part 2", "Part 2", "Part 2",
-    "Part 3", "Part 3"
+    "Verse 1", "Verse 1", "Verse 1", "Verse 1",
+    "Verse 2", "Verse 2", "Verse 2", "Verse 2",
+    "Verse 3", "Verse 3"
   ]);
 });
 
