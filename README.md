@@ -33,7 +33,7 @@ The line you have not reached yet stays hidden. Context is the previous line onl
 
 The Me tab can hold more than one player on this device. Songs are shared on the device. XP, streaks, mastery, and scores belong to the active player.
 
-The Board lists scores saved on this device. **Share my score** makes a card and a short text blurb with the song or concert name, the score, and the streak. The card does not include lyrics.
+The Board is the shared top 20. You pick a short display name once, and this browser remembers it. There is no account. **Share my score** makes a card and a short text blurb with the song or concert name, the score, and the streak. The card does not include lyrics.
 
 **Export progress** downloads a JSON file of scores, mastery counts, streaks, and XP. It is keyed by song title and artist and does not contain lyrics. **Import progress** merges a file like that and ignores any lyric text inside it. If both copies have a score, the higher one is kept.
 
@@ -93,18 +93,10 @@ The site is the repository root. [`.nojekyll`](.nojekyll) is included so Pages s
 
 `concerts.json` is loaded from that same site. Editing it and pushing updates the setlist. Still do not put lyrics in it.
 
-## A shared leaderboard later
+## Shared board
 
-Version 1 only knows about players on this device. Participant totals and a cross-device board need a backend, which this version does not include.
+The Board tab shows the top 20 overall and the top 20 for one song, plus your own rank. The name is saved in this browser. Scores and XP sync when you are online. If you are offline, they still save on this device and sync later.
 
-The score shape is already fixed so a Supabase table can be attached later. A remote row is only:
+A score sent to the board is the display name, a device id, the song id, the title, the artist, and the numbers. Lyric lines are not sent. The concert page still lists scores on this device only.
 
-| column | meaning |
-| --- | --- |
-| `player_name` | display name |
-| `concert` | concert id, such as `lany-soft-world-tour` |
-| `song_title` | title only |
-| `artist` | artist only |
-| `score` | number |
-
-There is no lyrics column. `createSupabaseProvider` in [`js/scores.js`](js/scores.js) speaks that shape, and `createScoreProvider` is the switch. Version 1 always returns the on-device provider. To connect Supabase later, return `createSupabaseProvider({ url, anonKey })` from that function and supply the URL and anon key at runtime. Do not commit keys. The concert page already reads `songScores` and `participantCount` from the provider, and it labels the current source **On this device**.
+The board is a Netlify Function that stores rows in Netlify Blobs. A site that already deploys this repo from `main` picks that up on the next deploy. It does not need a token, a database password, or a new setting. `createSupabaseProvider` in [`js/scores.js`](js/scores.js) is unused.

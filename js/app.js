@@ -56,6 +56,16 @@ import {
 import { createLineRecognizer, speechRecognitionSupported } from "./speech.js?v=11";
 import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=11";
 import { interpretHearing } from "./voice.js?v=11";
+import {
+  boardScreen,
+  fetchBoard,
+  loadBoardProfile,
+  markScoresPending,
+  pushScores,
+  saveBoardName,
+  saveBoardProfile,
+  snapshotFromProgress
+} from "./board.js?v=14";
 
 const session = {
   state: null,
@@ -69,6 +79,8 @@ const session = {
   toast: "",
   toastTimer: 0,
   boardFilter: "",
+  boardSong: "",
+  boardNaming: false,
   renaming: "",
   shareUrl: ""
 };
@@ -108,6 +120,37 @@ function providerFor() {
   return createScoreProvider(() => session.state, persist);
 }
 
+let boardSync = null;
+
+function syncSharedBoard() {
+  if (boardSync) return boardSync;
+  boardSync = syncSharedBoardNow().finally(() => {
+    boardSync = null;
+  });
+  return boardSync;
+}
+
+async function syncSharedBoardNow() {
+  try {
+    const profile = loadBoardProfile();
+    if (!profile.name || !profile.pending) return;
+    const result = await pushScores({
+      profile,
+      progress: progressOf(session.state),
+      now: Date.now()
+    });
+    saveBoardProfile(result.profile);
+    if (result.status === 400) {
+      session.boardNaming = true;
+      if (session.route.name === "board") armToast(result.error || "Choose a different name.");
+    }
+    if (session.route.name === "board" && !session.boardNaming) render();
+    else if (session.route.name === "board" && result.status === 400) render();
+  } catch {
+    // The lesson score is already stored on this device.
+  }
+}
+
 function armToast(message) {
   session.toast = message;
   clearTimeout(session.toastTimer);
@@ -130,6 +173,7 @@ async function boot() {
     session.concertsError = "Concerts could not be loaded. Open Know the Verse through a local server or GitHub Pages.";
   }
   window.addEventListener("hashchange", sync);
+  window.addEventListener("online", () => { void syncSharedBoard(); });
   document.addEventListener("click", onClick);
   document.addEventListener("keydown", onKeyDown);
   document.addEventListener("paste", onSheetPaste);
@@ -139,10 +183,12 @@ async function boot() {
   document.addEventListener("change", onChange);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") stopListening();
+    else void syncSharedBoard();
   });
   bindPlayViewport();
   if (!location.hash) location.hash = "#/";
   sync();
+  void syncSharedBoard();
 }
 
 function fitPlayViewport() {
@@ -249,6 +295,7 @@ function accentForId(concertId) {
 
 function shellAccent() {
   const route = session.route;
+  if (route.name === "board") return "violet";
   if (route.name === "concert") return accentForId(route.concertId);
   if (route.name === "song" || route.name === "play" || route.name === "edit" || route.name === "results") {
     const songId = route.songId || session.play?.songId || session.results?.songId;
@@ -273,9 +320,11 @@ function shell(body, { play }) {
   const tabs = !play && session.route.name !== "results";
   const route = session.route;
   const song = findSong(route.songId || session.play?.songId || session.results?.songId);
-  const concert = route.name === "concert"
-    ? session.concerts.find((item) => item.id === route.concertId)
-    : (song ? concertsForSong(session.concerts, song.title, song.artist)[0] : session.concerts[0]);
+  const concert = route.name === "board"
+    ? null
+    : route.name === "concert"
+      ? session.concerts.find((item) => item.id === route.concertId)
+      : (song ? concertsForSong(session.concerts, song.title, song.artist)[0] : session.concerts[0]);
   return `
     <div class="app tone-${tone} accent-${shellAccent()} ${play ? "is-play" : ""} ${tabs ? "has-tabs" : ""}" style="${accentStyle(concert)}">
       ${play ? "" : topbar()}
@@ -994,7 +1043,7 @@ async function viewConcert() {
       <p class="kicker">Setlist</p>
       <div data-testid="setlist">${setlist}</div>
       <p class="kicker">Leaderboard</p>
-      <p class="footnote" data-testid="leaderboard-source">${escapeHtml(provider.sourceLabel)}. A shared board can plug in later with name, concert, title, artist, and score.</p>
+      <p class="footnote" data-testid="leaderboard-source">${escapeHtml(provider.sourceLabel)}. The Board tab lists the shared top 20.</p>
       <div data-testid="concert-board">${rows}</div>
       ${summary.score > 0 ? `<div class="dock"><button class="btn btn-primary" type="button" data-action="share-concert" data-id="${escapeHtml(concert.id)}">Share concert score</button></div>` : ""}
     </section>
@@ -1017,38 +1066,107 @@ function setlistRow(concert, slot) {
   `;
 }
 
-async function viewBoard() {
-  const provider = providerFor();
-  const runs = await provider.listRuns();
-  const filters = [{ id: "", name: "All" }, ...session.concerts.map((concert) => ({ id: concert.id, name: concert.name }))];
-  const selected = session.boardFilter;
-  const concert = session.concerts.find((item) => item.id === selected);
-  const visible = runs.filter((run) => {
-    if (!concert) return true;
-    return concert.setlist.some((slot) => songsMatch(slot.title, slot.artist, run.songTitle, run.songArtist));
-  }).sort((a, b) => b.score - a.score || b.createdAt.localeCompare(a.createdAt)).slice(0, 30);
-  const rows = visible.length ? visible.map((run, index) => `
-    <article class="set-row" data-testid="board-row">
-      <span class="set-num">${index + 1}</span>
-      <div class="row-main">
-        <strong>${escapeHtml(run.playerName)}</strong>
-        <span class="sub">${escapeHtml(run.songTitle)} · ${escapeHtml(gameName(run.gameId))}</span>
-      </div>
-      <span class="sub">${formatScore(run.score)}</span>
-    </article>
-  `).join("") : `<p class="empty">Finish a lesson to post a score on this device.</p>`;
+function viewBoardName(profile) {
+  const back = profile.name
+    ? `<button class="btn btn-text" type="button" data-action="cancel-board-name">Back</button>`
+    : "";
   return `
-    <section class="screen">
+    <section class="screen board-name" data-testid="board-name">
       <header class="page-head">
-        <p class="kicker">${escapeHtml(provider.sourceLabel)}</p>
-        <h1>Leaderboard</h1>
+        <h1>Your name</h1>
       </header>
-      <div class="filters">${filters.map((filter) => `
-        <button type="button" data-action="filter-board" data-concert="${escapeHtml(filter.id)}" aria-pressed="${filter.id === selected ? "true" : "false"}">${escapeHtml(filter.name)}</button>
-      `).join("")}</div>
-      <div data-testid="board">${rows}</div>
+      <p class="sub">This name is shown on the shared board. It stays on this device.</p>
+      <form id="board-name-form" class="stack">
+        <label class="field">Display name
+          <input id="board-name" data-testid="board-name-input" type="text" name="display-name" maxlength="16" autocomplete="nickname" autocapitalize="words" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="Name" value="${escapeHtml(profile.name || "")}">
+        </label>
+        <p id="board-name-error" class="error" role="alert"></p>
+        <button class="btn btn-primary" type="submit" data-testid="board-save">Save name</button>
+        ${back}
+      </form>
+      <p class="fine">No account and no password. Lyrics stay on this device.</p>
     </section>
   `;
+}
+
+function viewBoardList(model) {
+  const filters = [`<button type="button" data-action="filter-board-song" data-song="" aria-pressed="${model.selected ? "false" : "true"}">Overall</button>`]
+    .concat(model.songs.map((song) => `
+      <button type="button" data-action="filter-board-song" data-song="${escapeHtml(song.id)}" aria-pressed="${song.id === model.selected ? "true" : "false"}">${escapeHtml(song.title)}</button>
+    `)).join("");
+  const rows = model.rows.map((row) => boardRow(row)).join("");
+  const pinned = model.you.showRow ? boardRow({
+    rank: model.you.rank,
+    name: model.name,
+    score: model.you.score,
+    xp: model.you.xp,
+    you: true
+  }) : "";
+  const list = rows || pinned
+    ? `${rows}${pinned}`
+    : `<p class="empty">No scores on the shared board yet.</p>`;
+  const rank = model.you.rank
+    ? `<p class="board-rank" data-testid="your-rank">${model.you.rank}</p>`
+    : `<p class="sub" data-testid="your-rank">${escapeHtml(model.you.note)}</p>`;
+  const numbers = model.you.score > 0 || model.you.xp > 0
+    ? `<p class="sub">${formatScore(model.you.score)} · ${formatScore(model.you.xp)} XP</p>`
+    : "";
+  return `
+    <section class="screen" data-testid="board">
+      <header class="page-head">
+        <h1>Leaderboard</h1>
+      </header>
+      <p class="sub" data-testid="board-status">${escapeHtml(model.status)}</p>
+      <div class="board-you" data-testid="board-you">
+        <p class="kicker">Your rank</p>
+        <p class="board-you-name">${escapeHtml(model.name)}</p>
+        ${rank}
+        ${numbers}
+      </div>
+      <div class="filters board-filters">${filters}</div>
+      <div data-testid="board-list">${list}</div>
+      <button class="btn btn-text" type="button" data-action="edit-board-name">Edit name</button>
+    </section>
+  `;
+}
+
+function boardRow(row) {
+  return `
+    <article class="set-row${row.you ? " is-you" : ""}" data-testid="board-row">
+      <span class="set-num">${row.rank}</span>
+      <div class="row-main">
+        <strong>${escapeHtml(row.name)}</strong>
+        ${row.you ? `<span class="sub">You</span>` : ""}
+      </div>
+      <span class="board-score">${formatScore(row.score)}<span>${formatScore(row.xp)} XP</span></span>
+    </article>
+  `;
+}
+
+async function viewBoard() {
+  const profile = loadBoardProfile();
+  if (!profile.name || session.boardNaming) return viewBoardName(profile);
+  const local = snapshotFromProgress(progressOf(session.state));
+  let remote = profile.cache;
+  let offline = false;
+  let busy = false;
+  try {
+    remote = await fetchBoard({ deviceId: profile.deviceId, songId: session.boardSong || "" });
+    const latest = loadBoardProfile();
+    if (!latest.pending) saveBoardProfile({ ...latest, cache: remote });
+  } catch (error) {
+    offline = true;
+    busy = error?.status === 429;
+    remote = loadBoardProfile().cache;
+  }
+  return viewBoardList(boardScreen({
+    profile: loadBoardProfile(),
+    remote,
+    local,
+    songId: session.boardSong || "",
+    offline,
+    busy
+  }));
 }
 
 function viewMe() {
@@ -1906,6 +2024,8 @@ async function finishLesson() {
     createdAt: new Date().toISOString()
   });
   await providerFor().submitRun(entry, session.concerts);
+  markScoresPending(undefined, progress);
+  void syncSharedBoard();
   const accuracy = play.answered ? Math.round((100 * play.correct) / play.answered) : 0;
   session.results = {
     songId: song.id,
@@ -2430,8 +2550,18 @@ function onClick(event) {
     session.state.settings.sound = !session.state.settings.sound;
     persist();
     render();
-  } else if (action === "share-results") shareResults();
+  }   else if (action === "share-results") shareResults();
   else if (action === "share-concert") shareConcert(el.dataset.id);
+  else if (action === "filter-board-song") {
+    session.boardSong = el.dataset.song || "";
+    render();
+  } else if (action === "edit-board-name") {
+    session.boardNaming = true;
+    render();
+  } else if (action === "cancel-board-name") {
+    session.boardNaming = false;
+    render();
+  }
 }
 
 function cancelModal() {
@@ -2490,6 +2620,17 @@ function onSubmit(event) {
   } else if (event.target.id === "rename-form") {
     event.preventDefault();
     saveRename(document.getElementById("rename-input")?.value || "");
+  } else if (event.target.id === "board-name-form") {
+    event.preventDefault();
+    const verdict = saveBoardName(document.getElementById("board-name")?.value || "", undefined, progressOf(session.state));
+    if (!verdict.ok) {
+      const error = document.getElementById("board-name-error");
+      if (error) error.textContent = verdict.error;
+      return;
+    }
+    session.boardNaming = false;
+    render();
+    void syncSharedBoard();
   }
 }
 
