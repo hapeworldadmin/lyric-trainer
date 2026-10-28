@@ -291,7 +291,7 @@ test("a failed sync keeps local progress and a later sync posts scores only", as
     local: buildSubmission(local, profile),
     offline: true
   });
-  assert.match(screen.status, /Saved on this device/);
+  assert.match(screen.status, /Saved here/);
   assert.equal(screen.you.score, 40);
   assert.equal(screen.you.rank, null);
   assert.equal(calls, 1);
@@ -313,7 +313,7 @@ test("the offline screen keeps your rank from the last board", () => {
   assert.equal(screen.you.rank, 21);
   assert.equal(screen.you.score, 15);
   assert.equal(screen.you.showRow, true);
-  assert.match(screen.status, /last shared board/);
+  assert.match(screen.status, /Last saved board/);
 });
 
 test("a name is saved once in local storage and a bad name is refused", () => {

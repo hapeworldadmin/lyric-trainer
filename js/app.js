@@ -1,6 +1,6 @@
 import { blip } from "./audio.js?v=9";
 import { readClipboardFromGesture } from "./clipboard.js?v=9";
-import { activeConcertSummary, concertStatusLine, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=11";
+import { activeConcertSummary, concertStatusLine, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=12";
 import {
   GAMES,
   advanceFade,
@@ -24,7 +24,7 @@ import {
   seededRng,
   singingMatch,
   studyFrame
-} from "./games.js?v=14";
+} from "./games.js?v=15";
 import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=9";
 import {
   addBonusXp,
@@ -40,10 +40,10 @@ import {
   resetLineMasteryIfChanged,
   retitleSongProgress,
   songStats
-} from "./progress.js?v=11";
+} from "./progress.js?v=12";
 import { SAMPLE_SONG } from "./sample.js?v=9";
-import { createScoreProvider, sanitizeRun } from "./scores.js?v=11";
-import { drawShareCard, shareText } from "./share.js?v=9";
+import { createScoreProvider, sanitizeRun } from "./scores.js?v=12";
+import { drawShareCard, shareText } from "./share.js?v=10";
 import {
   activePlayer,
   activeProgress as progressOf,
@@ -71,7 +71,7 @@ import {
   saveBoardName,
   saveBoardProfile,
   snapshotFromProgress
-} from "./board.js?v=15";
+} from "./board.js?v=16";
 
 const session = {
   state: null,
@@ -125,7 +125,7 @@ function persist() {
   try {
     saveState(session.state);
   } catch {
-    armToast("This browser could not save more data.");
+    armToast("This browser cannot save more.");
   }
 }
 
@@ -197,10 +197,10 @@ async function boot() {
     const response = await fetch(new URL("../concerts.json", import.meta.url));
     if (!response.ok) throw new Error("missing");
     session.concerts = normalizeConcerts(await response.json());
-    session.concertsError = session.concerts.length ? "" : "No concerts are listed in concerts.json yet.";
+    session.concertsError = session.concerts.length ? "" : "No concerts in concerts.json.";
   } catch {
     session.concerts = [];
-    session.concertsError = "Concerts could not be loaded. Open Know the Verse through a local server or GitHub Pages.";
+    session.concertsError = "Could not load concerts. Use a local server or GitHub Pages.";
   }
   window.addEventListener("hashchange", sync);
   window.addEventListener("online", () => { void syncSharedBoard(); });
@@ -301,7 +301,7 @@ async function render() {
     else if (route.name === "me") body = viewMe();
     else body = viewHome();
   } catch (error) {
-    body = `<section class="screen"><h1>Something went wrong</h1><p>${escapeHtml(error.message || "Try again.")}</p></section>`;
+    body = `<section class="screen"><h1>That did not work</h1><p>${escapeHtml(error.message || "Try again.")}</p></section>`;
   }
   if (token !== renderToken) return;
   document.querySelector("dialog[open]")?.close();
@@ -371,7 +371,7 @@ function topbar() {
   const streak = progress.streak?.count || 0;
   const xp = progress.totalXp || 0;
   const pills = [
-    streak > 0 ? `<span class="pill" data-testid="streak-count">${icon("flame")} ${streak} streak</span>` : "",
+    streak > 0 ? `<span class="pill" data-testid="streak-count">${icon("flame")} ${streak}-day streak</span>` : "",
     xp > 0 ? `<span class="pill" data-testid="xp-total">${formatScore(xp)} XP</span>` : ""
   ].join("");
   return `
@@ -430,7 +430,7 @@ function viewHome() {
     <div class="rows" data-testid="up-next">${upcoming.map((slot) => upNextRow(concert, slot)).join("")}</div>` : "";
   const hero = concert && summary?.total ? `
     <header class="hero" style="${accentStyle(concert)}">
-      <p class="kicker">Next up</p>
+      <p class="kicker">Concert</p>
       <h1>${escapeHtml(concert.name)}</h1>
       <p class="hero-stat" data-testid="home-status">${escapeHtml(concertStatusLine(summary))}</p>
       <a class="btn btn-hero" href="#/concert/${encodeURIComponent(concert.id)}">Continue</a>
@@ -444,14 +444,14 @@ function viewHome() {
     ? `<div class="rows" data-testid="song-list">${songs.map((song) => songCard(song)).join("")}</div>`
     : `
     <div class="empty">
-      <p>No songs on this device yet.</p>
-      <button class="btn btn-text" type="button" data-action="restore-sample">Restore the sample song</button>
+      <p>No songs yet.</p>
+      <button class="btn btn-text" type="button" data-action="restore-sample">Restore sample</button>
     </div>`;
   return `
     <section class="screen">
       ${hero}
       ${upNext}
-      <p class="kicker">Songs</p>
+      ${concert && summary?.total ? `<p class="kicker">Songs</p>` : ""}
       ${list}
     </section>
   `;
@@ -472,7 +472,7 @@ function songCard(song) {
   const stats = songStats(progressOf(session.state), song);
   const sample = song.sample ? " · Sample" : "";
   const detail = stats.linesMastered > 0
-    ? `${stats.linesMastered} of ${stats.lineCount} lines mastered`
+    ? `${stats.linesMastered}/${stats.lineCount} mastered`
     : `${song.artist}${sample}`;
   return `
     <a class="row" href="#/song/${encodeURIComponent(song.id)}" data-testid="song-card">
@@ -502,7 +502,7 @@ function viewForm() {
       </header>
       <div class="stack">
         <label class="field">Lyrics
-          <textarea id="lyrics" data-testid="lyrics" spellcheck="false" placeholder="Paste lyrics here.">${escapeHtml(form.raw || "")}</textarea>
+          <textarea id="lyrics" data-testid="lyrics" spellcheck="false" placeholder="Paste lyrics">${escapeHtml(form.raw || "")}</textarea>
         </label>
         <div id="paste-status">${pasteStatusHtml(parsed)}</div>
         <label class="field">Title
@@ -512,9 +512,9 @@ function viewForm() {
           <input id="artist" data-testid="artist" type="text" maxlength="120" autocomplete="off" value="${escapeHtml(form.artist || "")}">
         </label>
         <p id="form-error" class="error" role="alert">${escapeHtml(form.error || "")}</p>
-        <button class="btn btn-primary" type="button" data-action="save-song" data-testid="save-song">Save song</button>
-        <button class="btn btn-text btn-danger" type="button" data-action="ask-delete" data-id="${escapeHtml(form.songId)}">Delete song</button>
-        <p class="fine">Lyrics you paste never leave this browser.</p>
+        <button class="btn btn-primary" type="button" data-action="save-song" data-testid="save-song">Save</button>
+        <button class="btn btn-text btn-danger" type="button" data-action="ask-delete" data-id="${escapeHtml(form.songId)}">Delete</button>
+        <p class="fine">Lyrics stay in this browser.</p>
       </div>
     </section>
   `;
@@ -536,28 +536,28 @@ function viewPaste() {
       <input id="artist" data-testid="artist" type="text" maxlength="120" autocomplete="off" value="${escapeHtml(form.artist || "")}">
     </label>` : "";
   const body = preview ? `
-    <p class="sub" data-testid="lyric-preview">${preview.lines.length} lines</p>
+    <p class="sub" data-testid="lyric-preview">${preview.lines.length} ${preview.lines.length === 1 ? "line" : "lines"}</p>
     <div class="preview">${previewLines}</div>
     ${metaFields}
-    <button class="btn btn-primary" type="button" data-action="confirm-paste" data-testid="looks-right">Looks right</button>
+    <button class="btn btn-primary" type="button" data-action="confirm-paste" data-testid="looks-right">Save</button>
     <button class="btn btn-text" type="button" data-action="retry-paste" data-testid="try-again">Try again</button>
   ` : `
     ${known ? `<a class="btn btn-secondary" id="find-lyrics" data-testid="find-lyrics" href="${escapeHtml(find)}" target="_blank" rel="noopener noreferrer">Find lyrics</a>` : ""}
     <button class="btn btn-primary" type="button" data-action="paste-clipboard" data-testid="paste-clipboard">Paste</button>
     ${form.fallback ? `
       <label class="field">Lyrics
-        <textarea id="lyrics" data-testid="lyrics" spellcheck="false" placeholder="Paste lyrics here.">${escapeHtml(form.raw || "")}</textarea>
+        <textarea id="lyrics" data-testid="lyrics" spellcheck="false" placeholder="Paste lyrics">${escapeHtml(form.raw || "")}</textarea>
       </label>
-      <p class="fine" data-testid="paste-hint">Press Cmd+V (or long-press, Paste)</p>
-      <button class="btn btn-text" type="button" data-action="use-fallback" data-testid="use-fallback" ${form.manual ? "" : "hidden"}>Use this paste</button>
+      <p class="fine" data-testid="paste-hint">Cmd+V, or long-press Paste</p>
+      <button class="btn btn-text" type="button" data-action="use-fallback" data-testid="use-fallback" ${form.manual ? "" : "hidden"}>Use paste</button>
     ` : ""}
-    <p class="fine">Lyrics you paste never leave this browser.</p>
+    <p class="fine">Lyrics stay in this browser.</p>
   `;
   return `
     <section class="screen" data-testid="paste-sheet">
       <a class="back" href="${back}">${icon("back")} Back</a>
       <header class="page-head">
-        <h1>${escapeHtml(known ? form.title : "Add a song")}</h1>
+        <h1>${escapeHtml(known ? form.title : "Add song")}</h1>
         ${known ? `<p class="sub">${escapeHtml(form.artist)}</p>` : ""}
       </header>
       <div class="stack">
@@ -571,20 +571,20 @@ function viewPaste() {
 
 function pasteStatusHtml(parsed) {
   if (!session.form?.raw?.trim()) {
-    return `<p class="hint">Paste the words, then save. A first line like <strong>Title - Artist</strong> fills the name in.</p>`;
+    return `<p class="hint">Paste lyrics, then save. Start with <strong>Title - Artist</strong> to name it.</p>`;
   }
-  const junk = parsed.removedJunk ? ` · removed ${parsed.removedJunk} junk ${parsed.removedJunk === 1 ? "line" : "lines"}` : "";
+  const junk = parsed.removedJunk ? ` · ${parsed.removedJunk} junk removed` : "";
   const preview = parsed.lines.slice(0, 2).map((line) => `<span>${escapeHtml(line)}</span>`).join("");
-  return `<p class="hint">${parsed.lines.length} ${parsed.lines.length === 1 ? "line" : "lines"} ready${junk}</p>${preview ? `<div class="preview">${preview}</div>` : ""}`;
+  return `<p class="hint">${parsed.lines.length} ${parsed.lines.length === 1 ? "line" : "lines"}${junk}</p>${preview ? `<div class="preview">${preview}</div>` : ""}`;
 }
 
 function detectChipHtml(parsed) {
   if (!parsed.detected || titleFieldsVisible(parsed)) return "";
   return `
     <div class="chip-row">
-      <span>Using <strong>${escapeHtml(parsed.title)}</strong> · ${escapeHtml(parsed.artist)}</span>
+      <span><strong>${escapeHtml(parsed.title)}</strong> · ${escapeHtml(parsed.artist)}</span>
       <button type="button" data-action="edit-title">Edit</button>
-      <button type="button" data-action="reject-title">Keep this line</button>
+      <button type="button" data-action="reject-title">Keep line</button>
     </div>
   `;
 }
@@ -600,7 +600,7 @@ function titleFieldsVisible(parsed) {
 
 function viewSong() {
   const song = findSong(session.route.songId);
-  if (!song) return missing("That song is not on this device.", "#/");
+  if (!song) return missing("Song not on this device.", "#/");
   const progress = progressOf(session.state);
   const stats = songStats(progress, song);
   const plan = chapterPlan(song.lines, song.sections || [], { chapters: stats.chapters || {}, rounds: stats.rounds || {} });
@@ -609,12 +609,12 @@ function viewSong() {
   const chapters = plan.map((chapter, index) => {
     const testid = chapter.id === "concert" ? `data-testid="game-concert"` : `data-testid="game-round"`;
     if (chapter.status === "unavailable") {
-      return `<button class="game" type="button" disabled ${testid}><span>${index + 1} ${escapeHtml(chapter.name)}<small>Not enough lines</small></span></button>`;
+      return `<button class="game" type="button" disabled ${testid}><span>${index + 1} ${escapeHtml(chapter.name)}<small>Too few lines</small></span></button>`;
     }
     if (chapter.status === "locked") {
       return `<button class="game is-locked" type="button" disabled ${testid}><span class="game-name">${index + 1} ${escapeHtml(chapter.name)}</span><span class="lock-mark">${icon("lock")} Locked</span></button>`;
     }
-    const mark = chapter.status === "done" ? "Done" : "Open";
+    const mark = chapter.status === "done" ? "Done" : "Ready";
     const href = chapter.id === "concert"
       ? `#/play/${encodeURIComponent(song.id)}/concert`
       : `#/play/${encodeURIComponent(song.id)}/round?round=${encodeURIComponent(chapter.roundId)}`;
@@ -628,7 +628,7 @@ function viewSong() {
   const links = concerts.map((item) => `<a class="text-link" href="#/concert/${encodeURIComponent(item.id)}">${escapeHtml(item.name)}</a>`).join("");
   const progressLine = stats.songMastered
     ? "Song mastered"
-    : `${doneCount} of ${rounds.length} rounds`;
+    : `${doneCount}/${rounds.length} rounds`;
   return `
     <section class="screen">
       <header class="hero hero-song" style="${accentStyle(concert)}">
@@ -638,16 +638,16 @@ function viewSong() {
       </header>
       <div class="meter-block">
         <p class="sub" data-testid="chapter-progress">${progressLine}</p>
-        <p class="sub" data-testid="song-mastery">${stats.linesMastered} of ${stats.lineCount} lines mastered</p>
+        <p class="sub" data-testid="song-mastery">${stats.linesMastered}/${stats.lineCount} lines</p>
         ${meter(stats.masteryPercent)}
       </div>
-      ${links ? `<p class="sub">On the setlist: ${links}</p>` : ""}
+      ${links ? `<p class="sub">Setlist: ${links}</p>` : ""}
       <p class="kicker">Rounds</p>
       <div class="game-list">${chapters}</div>
-      ${plan.some((chapter) => chapter.status === "locked") ? `<p class="chapter-note" data-testid="chapter-lock-note">Finish the previous round</p>` : ""}
+      ${plan.some((chapter) => chapter.status === "locked") ? `<p class="chapter-note" data-testid="chapter-lock-note">Finish the round before</p>` : ""}
       <div class="dock">
-        <a class="btn btn-text" href="#/edit/${encodeURIComponent(song.id)}">Edit lyrics</a>
-        <button class="btn btn-text btn-danger" type="button" data-action="ask-delete" data-id="${escapeHtml(song.id)}">Delete song</button>
+        <a class="btn btn-text" href="#/edit/${encodeURIComponent(song.id)}">Edit</a>
+        <button class="btn btn-text btn-danger" type="button" data-action="ask-delete" data-id="${escapeHtml(song.id)}">Delete</button>
       </div>
     </section>
   `;
@@ -655,7 +655,7 @@ function viewSong() {
 
 function viewPlay() {
   const play = session.play;
-  if (!play) return `<section class="screen"><p>That lesson is over.</p></section>`;
+  if (!play) return `<section class="screen"><p>This round is over.</p></section>`;
   ensureStudy();
   const question = play.questions[play.index];
   const meterNow = lessonMeter(play, question);
@@ -678,14 +678,14 @@ function viewPlay() {
     <section class="screen play-screen" data-testid="play">
       <div class="play-scroll">
         <div class="play-top">
-          <button class="icon-btn" type="button" data-action="leave" data-testid="leave-lesson" aria-label="Close lesson">${icon("close")}</button>
+          <button class="icon-btn" type="button" data-action="leave" data-testid="leave-lesson" aria-label="Close">${icon("close")}</button>
           <p class="play-crumb" data-testid="play-crumb">${escapeHtml(playCrumb(play, question))}</p>
           <div class="play-meta">
             <span class="score-pill" data-testid="score-pill" aria-label="Score ${formatScore(play.score)}">${formatScore(play.score)}</span>
-            ${showHearts ? `<div class="hearts" data-testid="hearts" aria-label="${play.hearts} of ${play.maxHearts} lives">${hearts}</div>` : ""}
+            ${showHearts ? `<div class="hearts" data-testid="hearts" aria-label="${play.hearts} of ${play.maxHearts} hearts">${hearts}</div>` : ""}
           </div>
         </div>
-        <div class="lesson-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${meterNow.now}" aria-label="Lesson progress" data-testid="lesson-progress">
+        <div class="lesson-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${meterNow.now}" aria-label="Progress" data-testid="lesson-progress">
           <span style="width:${meterNow.width}%"></span>
         </div>
         ${timer}
@@ -718,11 +718,11 @@ function activityName(question) {
   return {
     fade: "Fade",
     think: "Think",
-    order: "Word order",
-    next: "Next line",
-    lines: "Line order",
-    fill: "Fill the blank",
-    letters: "First letters"
+    order: "Order",
+    next: "Next",
+    lines: "Lines",
+    fill: "Fill",
+    letters: "Letters"
   }[question?.kind] || "";
 }
 
@@ -736,9 +736,9 @@ function playCrumb(play, question) {
   if (question?.kind === "think" && play?.study?.queue?.[0]) position = play.study.queue[0].id + 1;
   const study = question?.kind === "fade" || question?.kind === "think";
   let place = "";
-  if (context.section && position) place = `${context.section}, line ${position}`;
+  if (context.section && position) place = `${context.section} · line ${position}`;
   else if (!study && context.rangeLabel) place = context.rangeLabel;
-  else if (position) place = `line ${position}`;
+  else if (position) place = `Line ${position}`;
   const head = play.gameId === "round" && activityName(question) ? activityName(question) : play.gameName;
   return place ? `${head} · ${place}` : head;
 }
@@ -758,9 +758,9 @@ function contextHtml(question) {
   const context = question?.context;
   if (!context || question?.kind === "fade" || question?.kind === "think") return { before: "", after: "" };
   const showPrevious = context.previous && question.kind !== "next" && !question.hidesPrevious && !question.sing;
-  let previous = showPrevious ? `${qLabel("Previous line")}${lyricBlock(context.previous, "context-previous", "is-context")}` : "";
+  let previous = showPrevious ? `${qLabel("Before")}${lyricBlock(context.previous, "context-previous", "is-context")}` : "";
   if (question.sing && question.prompt) {
-    previous = `${qLabel("Previous line")}${lyricBlock(question.prompt, "context-previous")}`;
+    previous = `${qLabel("Before")}${lyricBlock(question.prompt, "context-previous")}`;
   }
   const allowNext = session.play?.gameId === "lines" && question.kind === "lines";
   const next = allowNext && context.next ? lyricBlock(context.next, "context-next") : "";
@@ -774,7 +774,7 @@ function voiceReady() {
 function questionHtml(question) {
   if (question.kind === "fade" || question.kind === "think") return studyHtml(question);
   if (question.sing) {
-    const ask = voiceReady() ? "Sing or type the next line" : "Type the next line";
+    const ask = voiceReady() ? "Sing or type" : "Type the line";
     return qLabel(ask, "question");
   }
   if (question.kind === "order") return orderTargetHtml(question);
@@ -783,33 +783,33 @@ function questionHtml(question) {
     const before = question.before ? `${escapeHtml(question.before)} ` : "";
     const after = question.after ? ` ${escapeHtml(question.after)}` : "";
     const blank = picked ? escapeHtml(picked) : "";
-    return `${qLabel("Fill the blank")}<p class="target-line" data-testid="question">${before}<span class="target-blank ${picked ? "filled" : ""}">${blank}</span>${after}</p>`;
+    return `${qLabel("Missing word")}<p class="target-line" data-testid="question">${before}<span class="target-blank ${picked ? "filled" : ""}">${blank}</span>${after}</p>`;
   }
   if (question.kind === "next") {
-    return `<div class="lyric-block"><p class="lyric-line target-line" data-testid="question">${escapeHtml(question.prompt)}</p></div>${qLabel("What comes next?")}`;
+    return `<div class="lyric-block"><p class="lyric-line target-line" data-testid="question">${escapeHtml(question.prompt)}</p></div>${qLabel("Next line")}`;
   }
   if (question.kind === "previous") {
-    return `<div class="lyric-block"><p class="lyric-line target-line" data-testid="question">${escapeHtml(question.prompt)}</p></div>${qLabel("What comes before?")}`;
+    return `<div class="lyric-block"><p class="lyric-line target-line" data-testid="question">${escapeHtml(question.prompt)}</p></div>${qLabel("Line before")}`;
   }
   if (question.kind === "letters") {
-    return `<p class="hint-line" data-testid="question">${escapeHtml(question.hint)}</p>${qLabel("Pick the line")}`;
+    return `<p class="hint-line" data-testid="question">${escapeHtml(question.hint)}</p>${qLabel("Which line")}`;
   }
   if (question.kind === "truth") {
-    return `<div class="lyric-block"><p class="lyric-line target-line" data-testid="question">${escapeHtml(question.prompt)}</p></div>${qLabel("Does this line come right after?")}<div class="lyric-block"><p class="lyric-line target-line">${escapeHtml(question.claim)}</p></div>`;
+    return `<div class="lyric-block"><p class="lyric-line target-line" data-testid="question">${escapeHtml(question.prompt)}</p></div>${qLabel("Right after?")}<div class="lyric-block"><p class="lyric-line target-line">${escapeHtml(question.claim)}</p></div>`;
   }
   if (question.kind === "which") {
-    return `<div class="lyric-block"><p class="lyric-line target-line" data-testid="question">${escapeHtml(question.prompt)}</p></div>${qLabel("Which section is this?")}`;
+    return `<div class="lyric-block"><p class="lyric-line target-line" data-testid="question">${escapeHtml(question.prompt)}</p></div>${qLabel("Which section")}`;
   }
-  if (question.kind === "intruder") return qLabel("Which line does not belong?", "question");
-  if (question.kind === "lines") return qLabel("Tap the lines in order", "question");
-  return qLabel("Tap the words in order", "question");
+  if (question.kind === "intruder") return qLabel("Odd one out", "question");
+  if (question.kind === "lines") return qLabel("Lines in order", "question");
+  return qLabel("Words in order", "question");
 }
 
 function studyHtml(question) {
   const frame = studyFrame(question, ensureStudy() || {});
-  if (!frame) return qLabel("Read this line", "question");
+  if (!frame) return qLabel("Read", "question");
   const previous = frame.previous
-    ? `${qLabel("Previous line")}${lyricBlock(frame.previous, "context-previous", "is-context")}`
+    ? `${qLabel("Before")}${lyricBlock(frame.previous, "context-previous", "is-context")}`
     : "";
   if (frame.kind === "think") {
     const target = frame.target ? lyricBlock(frame.target, "think-line") : "";
@@ -821,7 +821,7 @@ function studyHtml(question) {
       ? `<span class="target-word">${escapeHtml(word)}</span>`
       : `<span class="target-blank" data-testid="fade-blank"></span>`
   )).join(" ");
-  const place = `${fadePassLabel(frame.pass)} · line ${frame.line + 1} of ${frame.lineCount}`;
+  const place = `${fadePassLabel(frame.pass)} · ${frame.line + 1}/${frame.lineCount}`;
   return `${previous}${qLabel(frame.prompt, "question")}<div class="lyric-block"><p class="target-line" data-testid="fade-line">${words}</p></div><p class="hint" data-testid="fade-pass">${escapeHtml(place)}</p>`;
 }
 
@@ -834,7 +834,7 @@ function orderTargetHtml(question) {
     if (!placed) return `<span class="target-blank"></span>`;
     return `<span class="target-word">${escapeHtml(placed)}</span>`;
   }).join(" ");
-  return `${qLabel("Put the words in order")}<div class="lyric-block"><p class="target-line" data-testid="question">${words}</p></div><p class="play-status" data-testid="order-status" role="status"></p>`;
+  return `${qLabel("Words in order")}<div class="lyric-block"><p class="target-line" data-testid="question">${words}</p></div><p class="play-status" data-testid="order-status" role="status"></p>`;
 }
 
 function keyHint(index) {
@@ -850,8 +850,8 @@ function singAnswerParts() {
   const fieldValue = escapeHtml(listening ? "" : (play?.typed || ""));
   const wrong = Boolean(play?.miss);
   const mic = voice ? `
-    <button class="mic-btn${listening ? " is-listening" : ""}" type="button" data-action="toggle-mic" data-testid="mic" aria-pressed="${listening ? "true" : "false"}" aria-label="${listening ? "Stop listening" : "Sing or speak"}">${icon("mic")}</button>` : "";
-  const choices = voice ? `<button class="btn btn-ghost" type="button" data-action="cant-sing" data-testid="cant-sing">Show choices</button>` : "";
+    <button class="mic-btn${listening ? " is-listening" : ""}" type="button" data-action="toggle-mic" data-testid="mic" aria-pressed="${listening ? "true" : "false"}" aria-label="${listening ? "Stop" : "Sing or speak"}">${icon("mic")}</button>` : "";
+  const choices = voice ? `<button class="btn btn-ghost" type="button" data-action="cant-sing" data-testid="cant-sing">Choices</button>` : "";
   const heard = wrong && play.miss.heard
     ? `<span class="heard-note" data-testid="heard-note">Heard: ${escapeHtml(play.miss.heard)}</span>` : "";
   const missBody = [wrong ? escapeHtml(play.miss.message) : "", heard].filter(Boolean).join(" ");
@@ -861,7 +861,7 @@ function singAnswerParts() {
           <p class="live-transcript" data-testid="live-transcript" ${listening && play?.voiceDisplay ? "" : "hidden"}>${transcript}</p>
         </div>` : "";
   const reveal = (play?.questionMistakes || 0) >= 2
-    ? `<button class="btn btn-ghost" type="button" data-action="show-answer" data-testid="show-answer">Show answer</button>` : "";
+    ? `<button class="btn btn-ghost" type="button" data-action="show-answer" data-testid="show-answer">Reveal</button>` : "";
   return {
     tray: "",
     chips: `
@@ -870,7 +870,7 @@ function singAnswerParts() {
         <p class="sing-miss" data-testid="sing-miss" role="status">${missBody}</p>
         <div class="sing-field${wrong ? " is-wrong" : ""}" id="sing-field" data-testid="sing-field">
           <div class="sing-row">
-            <input class="sing-input" id="answer-input" data-testid="sing-input" type="text" enterkeyhint="done" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Next line" value="${fieldValue}">
+            <input class="sing-input" id="answer-input" data-testid="sing-input" type="text" enterkeyhint="done" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Line" value="${fieldValue}">
             ${mic}
           </div>
         </div>
@@ -939,13 +939,13 @@ function checkControl() {
 }
 
 function continueControl(play) {
-  const nextLabel = play.hearts <= 0 || play.index >= play.questions.length - 1 ? "See results" : "Continue";
+  const nextLabel = play.hearts <= 0 || play.index >= play.questions.length - 1 ? "Results" : "Continue";
   return `<div class="dock"><button class="btn btn-primary" type="button" data-action="continue" data-primary data-testid="continue">${nextLabel} <span class="key-hint">Enter</span></button></div>`;
 }
 
 function feedbackBody(play) {
   const feedback = play.feedback;
-  const praise = feedback.correct ? "Correct" : (feedback.timeout ? "Time is up" : "Not quite");
+  const praise = feedback.correct ? "Correct" : (feedback.timeout ? "Out of time" : "Not quite");
   const xp = feedback.xp ? ` +${feedback.xp} XP` : "";
   return `
     <div class="feedback ${feedback.correct ? "is-good" : "is-bad"}" role="status" data-testid="feedback">
@@ -969,32 +969,32 @@ function viewResults() {
           <span>${escapeHtml(section.opener)}</span>
           <span class="sub">${section.mastered}/${section.total}${section.done ? " · done" : ""}</span>
         </button>
-        ${section.done ? `<button class="btn btn-text" type="button" data-action="practice-again" data-round="${escapeHtml(section.roundId)}">Practice again</button>` : ""}
+        ${section.done ? `<button class="btn btn-text" type="button" data-action="practice-again" data-round="${escapeHtml(section.roundId)}">Again</button>` : ""}
       `).join("")}
     </div>` : "";
   const finalLocked = song ? chapterPlan(song.lines, song.sections || [], { chapters: stats?.chapters || {}, rounds: stats?.rounds || {} }).find((item) => item.id === "concert")?.status === "locked" : false;
   const bits = [];
   if (results.xp > 0) bits.push(`${results.xp} XP`);
-  if (results.accuracy > 0) bits.push(`${results.accuracy}% accuracy`);
-  if (results.streak > 0) bits.push(`<span data-testid="result-streak">${results.streak}</span> day streak`);
+  if (results.accuracy > 0) bits.push(`${results.accuracy}% correct`);
+  if (results.streak > 0) bits.push(`<span data-testid="result-streak">${results.streak}</span>-day streak`);
   return `
     <section class="screen">
       <header class="page-head">
-        <p class="kicker">${results.songMastered ? "Song mastered" : (results.newBest ? "New best" : "Round complete")}</p>
+        <p class="kicker">${results.songMastered ? "Song mastered" : (results.newBest ? "New best" : "Round done")}</p>
         <h1 data-testid="final-score">${formatScore(results.score)}</h1>
         <p class="sub">${escapeHtml(results.title)} · ${escapeHtml(results.artist)}</p>
       </header>
-      <p class="sub" data-testid="hearts-left">${results.hearts} hearts left</p>
+      <p class="sub" data-testid="hearts-left">${results.hearts} hearts</p>
       ${bits.length ? `<p class="sub">${bits.join(" · ")}</p>` : ""}
       <div class="dock">
-        <button class="btn btn-primary" type="button" data-action="keep-practicing" data-primary data-testid="keep-practicing">Keep practicing <span class="key-hint">Enter</span></button>
-        <button class="btn btn-secondary" type="button" data-action="toggle-sections" data-testid="practice-section">Practice a section</button>
+        <button class="btn btn-primary" type="button" data-action="keep-practicing" data-primary data-testid="keep-practicing">Practice <span class="key-hint">Enter</span></button>
+        <button class="btn btn-secondary" type="button" data-action="toggle-sections" data-testid="practice-section">Practice section</button>
         ${open}
         ${finalLocked
           ? `<button class="btn btn-secondary" type="button" disabled data-testid="final-run">Final run</button>`
           : `<a class="btn btn-secondary" data-testid="final-run" href="#/play/${encodeURIComponent(results.songId)}/concert">Final run</a>`}
-        <button class="btn btn-text" type="button" data-action="share-results" data-testid="share-score">Share my score</button>
-        <a class="btn btn-text" href="#/song/${encodeURIComponent(results.songId)}">Back to song</a>
+        <button class="btn btn-text" type="button" data-action="share-results" data-testid="share-score">Share score</button>
+        <a class="btn btn-text" href="#/song/${encodeURIComponent(results.songId)}">Back</a>
         ${nextLyricsLink(results.title, results.artist, "")}
       </div>
     </section>
@@ -1008,8 +1008,8 @@ function viewConcerts() {
   const cards = session.concerts.map((concert) => {
     const summary = activeConcertSummary(concert, session.state.songs, progressOf(session.state));
     const detail = summary.mastered > 0
-      ? `${summary.mastered} of ${summary.total} songs mastered`
-      : (concert.label || "Paste lyrics when a song needs them");
+      ? `${summary.mastered}/${summary.total} mastered`
+      : (concert.label || "Needs lyrics");
     return `
       <a class="row" href="#/concert/${encodeURIComponent(concert.id)}" data-testid="concert-card">
         <span class="tile tile-concert accent-${accentForId(concert.id)}" aria-hidden="true">${escapeHtml(initial(concert.name))}</span>
@@ -1025,7 +1025,7 @@ function viewConcerts() {
       <header class="page-head">
         <h1>Concerts</h1>
       </header>
-      <p class="sub">A concert is a folder of song titles. Paste lyrics here when a slot needs them.</p>
+      <p class="sub">Titles only. Paste lyrics into empty slots.</p>
       <div class="rows">${cards || '<p class="empty">No concerts yet.</p>'}</div>
     </section>
   `;
@@ -1033,7 +1033,7 @@ function viewConcerts() {
 
 async function viewConcert() {
   const concert = session.concerts.find((item) => item.id === session.route.concertId);
-  if (!concert) return missing("That concert is not in concerts.json.", "#/concerts");
+  if (!concert) return missing("Not in concerts.json.", "#/concerts");
   const progress = progressOf(session.state);
   const summary = activeConcertSummary(concert, session.state.songs, progress);
   const provider = providerFor();
@@ -1043,18 +1043,18 @@ async function viewConcert() {
   ]);
   const board = leaderboardFromSongScores(scores, concert.setlist);
   const playerNoun = participants === 1 ? "player" : "players";
-  const where = provider.source === "device" ? "on this device" : "on the shared board";
+  const where = provider.source === "device" ? "here" : "on the board";
   const masteredLine = concertStatusLine(summary);
   const setlist = summary.total ? summary.slots.map((slot) => setlistRow(concert, slot)).join("") : `
-    <p class="empty">Add title and artist pairs to concerts.json. Leave lyrics out of that file.</p>
+    <p class="empty">Add titles and artists in concerts.json. No lyrics there.</p>
   `;
   const rows = board.length ? board.map((row, index) => `
     <article class="set-row">
       <span class="set-num">${index + 1}</span>
-      <div class="row-main"><strong>${escapeHtml(row.playerName)}</strong><span class="sub">${row.played} of ${row.total} scored</span></div>
+      <div class="row-main"><strong>${escapeHtml(row.playerName)}</strong><span class="sub">${row.played}/${row.total} scored</span></div>
       <span class="sub">${formatScore(row.score)}</span>
     </article>
-  `).join("") : `<p class="empty">No scores on this concert yet.</p>`;
+  `).join("") : `<p class="empty">No scores yet.</p>`;
   const people = participants > 0 ? `<p class="sub" data-testid="participants">${participants} ${playerNoun} ${where}</p>` : "";
   return `
     <section class="screen" data-testid="concert-page">
@@ -1066,16 +1066,16 @@ async function viewConcert() {
         <p class="hero-stat" data-testid="concert-mastered">${escapeHtml(masteredLine)}</p>
         ${summary.total ? meter(summary.total ? Math.round((summary.mastered / summary.total) * 100) : 0) : ""}
       </header>
-      ${concert.source ? `<p class="sub"><a class="text-link" data-testid="concert-source" href="${escapeHtml(concert.source)}" target="_blank" rel="noopener noreferrer">Source setlist</a></p>` : ""}
-      ${summary.score > 0 ? `<p class="sub" data-testid="concert-score">Your score ${formatScore(summary.score)}</p>` : ""}
+      ${concert.source ? `<p class="sub"><a class="text-link" data-testid="concert-source" href="${escapeHtml(concert.source)}" target="_blank" rel="noopener noreferrer">Source</a></p>` : ""}
+      ${summary.score > 0 ? `<p class="sub" data-testid="concert-score">Score ${formatScore(summary.score)}</p>` : ""}
       ${people}
       ${nextLyricsLink("", "", concert.id)}
       <p class="kicker">Setlist</p>
       <div data-testid="setlist">${setlist}</div>
       <p class="kicker">Leaderboard</p>
-      <p class="footnote" data-testid="leaderboard-source">${escapeHtml(provider.sourceLabel)}. The Board tab lists the shared top 20.</p>
+      <p class="footnote" data-testid="leaderboard-source">${escapeHtml(provider.sourceLabel)}. Top 20 is on Board.</p>
       <div data-testid="concert-board">${rows}</div>
-      ${summary.score > 0 ? `<div class="dock"><button class="btn btn-primary" type="button" data-action="share-concert" data-id="${escapeHtml(concert.id)}">Share concert score</button></div>` : ""}
+      ${summary.score > 0 ? `<div class="dock"><button class="btn btn-primary" type="button" data-action="share-concert" data-id="${escapeHtml(concert.id)}">Share score</button></div>` : ""}
     </section>
   `;
 }
@@ -1103,19 +1103,19 @@ function viewBoardName(profile) {
   return `
     <section class="screen board-name" data-testid="board-name">
       <header class="page-head">
-        <h1>Your name</h1>
+        <h1>Name</h1>
       </header>
-      <p class="sub">This name is shown on the shared board. It stays on this device.</p>
+      <p class="sub">Shown on the board. Saved on this device.</p>
       <form id="board-name-form" class="stack">
-        <label class="field">Display name
+        <label class="field">Name
           <input id="board-name" data-testid="board-name-input" type="text" name="display-name" maxlength="16" autocomplete="nickname" autocapitalize="words" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="Name" value="${escapeHtml(profile.name || "")}">
         </label>
         <p id="board-name-error" class="error" role="alert"></p>
-        <button class="btn btn-primary" type="submit" data-testid="board-save">Save name</button>
+        <button class="btn btn-primary" type="submit" data-testid="board-save">Save</button>
         ${back}
       </form>
-      <button class="btn btn-text" type="button" data-action="enter-code" data-testid="enter-code">I have a code</button>
-      <p class="fine">No account and no password. Lyrics stay on this device.</p>
+      <button class="btn btn-text" type="button" data-action="enter-code" data-testid="enter-code">Enter a code</button>
+      <p class="fine">No account. Lyrics stay on this device.</p>
     </section>
   `;
 }
@@ -1135,7 +1135,7 @@ function viewBoardList(model) {
   }) : "";
   const list = rows || pinned
     ? `${rows}${pinned}`
-    : `<p class="empty">No scores on the shared board yet.</p>`;
+    : `<p class="empty">No scores yet.</p>`;
   const rank = model.you.rank
     ? `<p class="board-rank" data-testid="your-rank">${model.you.rank}</p>`
     : `<p class="sub" data-testid="your-rank">${escapeHtml(model.you.note)}</p>`;
@@ -1145,18 +1145,18 @@ function viewBoardList(model) {
   return `
     <section class="screen" data-testid="board">
       <header class="page-head">
-        <h1>Leaderboard</h1>
+        <h1>Board</h1>
       </header>
       <p class="sub" data-testid="board-status">${escapeHtml(model.status)}</p>
       <div class="board-you" data-testid="board-you">
-        <p class="kicker">Your rank</p>
+        <p class="kicker">Rank</p>
         <p class="board-you-name">${escapeHtml(model.name)}</p>
         ${rank}
         ${numbers}
       </div>
       <div class="filters board-filters">${filters}</div>
       <div data-testid="board-list">${list}</div>
-      <button class="btn btn-text" type="button" data-action="edit-board-name">Edit name</button>
+      <button class="btn btn-text" type="button" data-action="edit-board-name">Rename</button>
       ${linkActions()}
     </section>
   `;
@@ -1164,12 +1164,12 @@ function viewBoardList(model) {
 
 function linkActions() {
   const linked = loadBoardProfile().linked
-    ? `<p class="fine" data-testid="link-status">This device is linked.</p>`
+    ? `<p class="fine" data-testid="link-status">Linked.</p>`
     : "";
   return `
     <div class="stack link-actions">
-      <button class="btn btn-text" type="button" data-action="link-device" data-testid="link-device">Link another device</button>
-      <button class="btn btn-text" type="button" data-action="enter-code" data-testid="enter-code">I have a code</button>
+      <button class="btn btn-text" type="button" data-action="link-device" data-testid="link-device">Link a device</button>
+      <button class="btn btn-text" type="button" data-action="enter-code" data-testid="enter-code">Enter a code</button>
       ${linked}
     </div>
   `;
@@ -1182,11 +1182,11 @@ function formatLinkCode(code) {
 }
 
 function linkExpiryCopy(expiresAt) {
-  if (!expiresAt) return "Works once, for about 10 minutes.";
+  if (!expiresAt) return "One use. About 10 minutes.";
   const left = expiresAt - Date.now();
-  if (left <= 0) return "This code has expired.";
+  if (left <= 0) return "Code expired.";
   const minutes = Math.max(1, Math.ceil(left / 60000));
-  return minutes === 1 ? "Expires in 1 minute. Works once." : `Expires in ${minutes} minutes. Works once.`;
+  return minutes === 1 ? "Expires in 1 minute. One use." : `Expires in ${minutes} minutes. One use.`;
 }
 
 function viewLink() {
@@ -1194,9 +1194,9 @@ function viewLink() {
     return `
       <section class="screen link-panel" data-testid="link-join">
         <header class="page-head">
-          <h1>I have a code</h1>
+          <h1>Enter a code</h1>
         </header>
-        <p class="sub">Enter the code from your other device. Scores and lesson progress follow that player.</p>
+        <p class="sub">Enter the code from the other device. Scores and progress follow.</p>
         <form id="link-code-form" class="stack">
           <label class="field">Code
             <input id="link-code-input" data-testid="link-code-input" type="text" name="device-code" inputmode="text" maxlength="12" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="ABC DEF" value="${escapeHtml(session.linkDraft || "")}">
@@ -1205,12 +1205,12 @@ function viewLink() {
           <button class="btn btn-primary" type="submit" data-testid="link-submit" ${session.linkBusy ? "disabled" : ""}>Link</button>
         </form>
         <button class="btn btn-text" type="button" data-action="close-link">Back</button>
-        <p class="fine">Lyrics stay on each device. There is no account.</p>
+        <p class="fine">Lyrics stay on each device. No account.</p>
       </section>
     `;
   }
   const expired = Boolean(session.linkCode) && session.linkExpiresAt > 0 && Date.now() >= session.linkExpiresAt;
-  let primary = `<button class="btn btn-primary" type="button" disabled>Creating a code…</button>`;
+  let primary = `<button class="btn btn-primary" type="button" disabled>Making a code</button>`;
   if (!session.linkBusy && session.linkError && !session.linkCode) {
     primary = `<button class="btn btn-primary" type="button" data-action="link-device" data-testid="link-retry">Try again</button>`;
   } else if (!session.linkBusy && expired) {
@@ -1229,14 +1229,14 @@ function viewLink() {
   return `
     <section class="screen link-panel" data-testid="link-create">
       <header class="page-head">
-        <h1>Link another device</h1>
+        <h1>Link a device</h1>
       </header>
-      <p class="sub">Same player, same scores, same lesson progress. On the other device, choose I have a code.</p>
+      <p class="sub">Same scores and progress. On the other device, choose Enter a code.</p>
       ${code}
       ${detail}
       ${primary}
       <button class="btn btn-text" type="button" data-action="close-link">Back</button>
-      <p class="fine">The code works once. Lyrics are not sent.</p>
+      <p class="fine">One use. Lyrics are not sent.</p>
     </section>
   `;
 }
@@ -1299,7 +1299,7 @@ function viewMe() {
             <label class="field">Name
               <input id="rename-input" type="text" maxlength="40" value="${escapeHtml(item.name)}">
             </label>
-            <button class="btn btn-primary" type="submit">Save name</button>
+            <button class="btn btn-primary" type="submit">Save</button>
           </form>
         </article>
       `;
@@ -1308,7 +1308,7 @@ function viewMe() {
       <article class="player${active ? " is-active" : ""}">
         <div>
           <strong>${escapeHtml(item.name)}</strong>
-          <span class="sub">${(state.progress[item.id]?.totalXp || 0) > 0 ? `${formatScore(state.progress[item.id].totalXp)} XP` : "No score yet"}</span>
+          <span class="sub">${(state.progress[item.id]?.totalXp || 0) > 0 ? `${formatScore(state.progress[item.id].totalXp)} XP` : "No score"}</span>
         </div>
         <div class="row-actions">
           ${active ? "" : `<button class="btn btn-text btn-small" type="button" data-action="switch-player" data-id="${escapeHtml(item.id)}">Play as</button>`}
@@ -1320,42 +1320,42 @@ function viewMe() {
   }).join("");
   const facts = [];
   if ((progress.totalXp || 0) > 0) facts.push(`${formatScore(progress.totalXp)} XP`);
-  if ((progress.streak?.count || 0) > 0) facts.push(`${progress.streak.count} day streak`);
-  if (practiced > 0) facts.push(`${practiced} songs scored`);
+  if ((progress.streak?.count || 0) > 0) facts.push(`${progress.streak.count}-day streak`);
+  if (practiced > 0) facts.push(`${practiced} songs`);
   return `
     <section class="screen">
       <header class="page-head">
         <h1>${escapeHtml(player.name)}</h1>
       </header>
-      <p class="sub">${facts.length ? facts.join(" · ") : "Finish a lesson to start a score."}</p>
-      <p class="fine">Songs are shared on this device. Scores, streaks, and XP belong to the active player.</p>
+      <p class="sub">${facts.length ? facts.join(" · ") : "Finish a lesson to start."}</p>
+      <p class="fine">Songs are shared here. Scores, streaks, and XP stay with this player.</p>
       <p class="kicker">Players</p>
       <form id="player-form" class="stack">
-        <label class="field">New player
+        <label class="field">Name
           <input id="player-name" data-testid="player-name" type="text" maxlength="40" placeholder="Name" autocomplete="off">
         </label>
         <button class="btn btn-primary" type="submit">Add player</button>
       </form>
       <div>${players}</div>
       <p class="kicker">Devices</p>
-      <p class="sub">Link a phone and a computer. Scores and lesson progress follow the current player. No account.</p>
+      <p class="sub">Link a phone and a computer. Scores and progress follow this player.</p>
       ${linkActions()}
-      <p class="kicker">Progress file</p>
-      <p class="sub">Export is scores, mastery counts, and streaks only. It does not include lyrics.</p>
+      <p class="kicker">Backup</p>
+      <p class="sub">Scores, mastery, and streaks. No lyrics.</p>
       <div class="stack">
-        <button class="btn btn-primary" type="button" data-action="export-progress" data-testid="export-progress">Export progress</button>
-        <button class="btn btn-text" type="button" data-action="pick-import" data-testid="import-progress">Import progress</button>
+        <button class="btn btn-primary" type="button" data-action="export-progress" data-testid="export-progress">Export</button>
+        <button class="btn btn-text" type="button" data-action="pick-import" data-testid="import-progress">Import</button>
         <input id="import-file" type="file" accept="application/json,.json" hidden>
         <button class="btn btn-text" type="button" data-action="toggle-sound">${state.settings.sound ? "Sound on" : "Sound off"}</button>
-        <button class="btn btn-text" type="button" data-action="restore-sample">Restore sample song</button>
-        <button class="btn btn-text btn-danger" type="button" data-action="ask-erase">Erase everything on this device</button>
+        <button class="btn btn-text" type="button" data-action="restore-sample">Restore sample</button>
+        <button class="btn btn-text btn-danger" type="button" data-action="ask-erase">Erase this device</button>
       </div>
     </section>
   `;
 }
 
 function missing(message, href) {
-  return `<section class="screen"><h1>${escapeHtml(message)}</h1><a class="btn btn-primary" href="${href}">Go back</a></section>`;
+  return `<section class="screen"><h1>${escapeHtml(message)}</h1><a class="btn btn-primary" href="${href}">Back</a></section>`;
 }
 
 function ensureForm() {
@@ -1480,7 +1480,7 @@ function saveSong() {
   }
   persist();
   session.form = null;
-  armToast("Saved on this device.");
+  armToast("Saved.");
   go(`#/song/${encodeURIComponent(song.id)}`);
 }
 
@@ -1497,14 +1497,14 @@ function packLines(parsed) {
 }
 
 function writeSong({ songId, title, artist, lines, sections }) {
-  if (!normalizeAnswer(title) || !normalizeAnswer(artist)) return { error: "Add a title and an artist." };
-  if (lines.length < 2) return { error: "Keep at least two lyric lines." };
+  if (!normalizeAnswer(title) || !normalizeAnswer(artist)) return { error: "Add a title and artist." };
+  if (lines.length < 2) return { error: "Need at least two lines." };
   const state = session.state;
   const existing = state.songs.find((song) => songKey(song.title, song.artist) === songKey(title, artist));
   if (songId) {
     const song = findSong(songId);
-    if (!song) return { error: "That song is not on this device." };
-    if (existing && existing.id !== song.id) return { error: "Another saved song already uses that title and artist." };
+    if (!song) return { error: "Song not on this device." };
+    if (existing && existing.id !== song.id) return { error: "That title and artist are already saved." };
     const previousLines = [...song.lines];
     const oldTitle = song.title;
     const oldArtist = song.artist;
@@ -1573,7 +1573,7 @@ function applyPastedText(text) {
   if (parsed.lines.length < 2) {
     form.preview = null;
     form.fallback = true;
-    form.error = "That paste did not include enough lyric lines.";
+    form.error = "Not enough lyric lines.";
     render();
     return;
   }
@@ -1608,7 +1608,7 @@ function confirmPaste() {
   persist();
   const lesson = firstLessonId(song.lines, song.sections);
   session.form = null;
-  armToast("Saved on this device.");
+  armToast("Saved.");
   go(`#/play/${encodeURIComponent(song.id)}/${lesson}`);
 }
 
@@ -1646,7 +1646,7 @@ function ensurePlay() {
     return false;
   }
   if (!gameAvailability(song.lines, song.sections || [])[game.id]) {
-    armToast("That game needs more lines in this song.");
+    armToast("Need more lines for this.");
     go(`#/song/${encodeURIComponent(song.id)}`);
     return false;
   }
@@ -1666,7 +1666,7 @@ function ensurePlay() {
     forceSing: route.params.sing === "1"
   });
   if (!questions.length) {
-    armToast(skipIds.length ? "That chapter is mastered." : "That game needs more lines in this song.");
+    armToast(skipIds.length ? "Round already mastered." : "Need more lines for this.");
     go(`#/song/${encodeURIComponent(song.id)}`);
     return false;
   }
@@ -1731,7 +1731,7 @@ function paintListening() {
   if (mic) {
     mic.classList.toggle("is-listening", on);
     mic.setAttribute("aria-pressed", on ? "true" : "false");
-    mic.setAttribute("aria-label", on ? "Stop listening" : "Sing or speak");
+    mic.setAttribute("aria-label", on ? "Stop" : "Sing or speak");
   }
   const status = document.querySelector("[data-testid=listen-status]");
   if (status) status.hidden = !on;
@@ -1858,7 +1858,7 @@ function judgeSing() {
   const field = document.getElementById("sing-field");
   field?.classList.add(correct ? "is-accept" : "is-reject");
   const status = document.querySelector("[data-testid=sing-miss]");
-  if (status) status.textContent = correct ? "" : "Not quite, try again";
+  if (status) status.textContent = correct ? "" : "Try again";
   buzz(correct ? 12 : 20);
   blip(correct ? "ok" : "bad", session.state.settings.sound);
   if (!correct) {
@@ -1866,7 +1866,7 @@ function judgeSing() {
     play.questionMistakes += 1;
     play.hearts = Math.max(0, play.hearts - 1);
     play.miss = {
-      message: "Not quite, try again",
+      message: "Try again",
       heard: fromVoice ? voiceRaw : ""
     };
     paintHearts();
@@ -1985,7 +1985,7 @@ function submitCurrent(forced = null) {
     } else {
       const order = ensureOrder();
       if (order.arranged.length !== question.tokens.length) {
-        showPlayNote("Place every word first.");
+        showPlayNote("Place each word.");
         return;
       }
       correct = gradeAnswer(question, order.arranged);
@@ -2205,13 +2205,13 @@ function askDelete(id) {
   if (!song) return;
   session.modal = {
     title: "Delete this song?",
-    body: "The lyrics are removed from this device. Scores stay, without the words.",
+    body: "Lyrics leave this device. Scores stay, without the words.",
     confirmLabel: "Delete",
     danger: true,
     onConfirm() {
       session.state.songs = session.state.songs.filter((item) => item.id !== id);
       persist();
-      armToast("Song deleted.");
+      armToast("Deleted.");
       go("#/");
     }
   };
@@ -2222,8 +2222,8 @@ function leaveLesson() {
   stopTimer();
   stopListening();
   session.modal = {
-    title: "Leave this lesson?",
-    body: "Hearts reset next time. XP you already earned stays saved.",
+    title: "Leave this round?",
+    body: "Hearts reset. XP you earned stays.",
     confirmLabel: "Leave",
     danger: true,
     onConfirm() {
@@ -2287,7 +2287,7 @@ function shareConcert(id) {
     score: summary.score,
     streak: progressOf(session.state).streak?.count || 0,
     playerName: activePlayer(session.state).name,
-    detail: summary.total ? `${summary.mastered} of ${summary.total} songs mastered` : ""
+    detail: summary.total ? `${summary.mastered}/${summary.total} mastered` : ""
   });
 }
 
@@ -2302,14 +2302,14 @@ function exportProgress() {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
-  armToast("Progress file downloaded.");
+  armToast("Exported.");
   render();
 }
 
 async function importFile(file) {
   if (!file) return;
   if (file.size > 1_500_000) {
-    armToast("That file is too large to be a progress export.");
+    armToast("File is too large.");
     render();
     return;
   }
@@ -2317,9 +2317,9 @@ async function importFile(file) {
     const data = JSON.parse(await file.text());
     mergeImport(session.state, data);
     persist();
-    armToast("Progress imported. Lyrics in that file were ignored.");
+    armToast("Imported. Lyrics in the file were skipped.");
   } catch (error) {
-    armToast(error.message || "Could not import that file.");
+    armToast(error.message || "Could not import.");
   }
   render();
 }
@@ -2328,7 +2328,7 @@ function addPlayer(name) {
   const clean = clip(name, 40);
   if (!clean) return;
   if (session.state.players.some((player) => player.name.toLowerCase() === clean.toLowerCase())) {
-    armToast("That player name is already on this device.");
+    armToast("That name is already here.");
     render();
     return;
   }
@@ -2337,7 +2337,7 @@ function addPlayer(name) {
   session.state.progress[player.id] = emptyProgress();
   session.state.activePlayerId = player.id;
   persist();
-  armToast(`Now playing as ${clean}.`);
+  armToast(`Playing as ${clean}.`);
   render();
 }
 
@@ -2363,7 +2363,7 @@ function saveRename(name) {
 
 function deletePlayer(id) {
   if (session.state.players.length < 2) {
-    armToast("Keep at least one player.");
+    armToast("Keep one player.");
     render();
     return;
   }
@@ -2372,7 +2372,7 @@ function deletePlayer(id) {
   session.state.leaderboard = (session.state.leaderboard || []).filter((run) => run.playerId !== id);
   if (session.state.activePlayerId === id) session.state.activePlayerId = session.state.players[0].id;
   persist();
-  armToast("Player removed.");
+  armToast("Removed.");
   render();
 }
 
@@ -2382,7 +2382,7 @@ function restoreSample() {
   }
   session.state.seeded = true;
   persist();
-  armToast("Sample song is ready.");
+  armToast("Sample is ready.");
   go("#/");
 }
 
@@ -2394,7 +2394,7 @@ function eraseAll() {
   session.results = null;
   session.form = null;
   persist();
-  armToast("Erased on this device.");
+  armToast("Erased.");
   go("#/");
 }
 
@@ -2402,11 +2402,11 @@ function modalHtml() {
   const modal = session.modal;
   if (!modal) return "";
   const share = modal.share ? `
-    ${modal.share.url ? `<img class="share-preview" alt="Score card" src="${modal.share.url}">` : ""}
+    ${modal.share.url ? `<img class="share-preview" alt="Score" src="${modal.share.url}">` : ""}
     <p class="share-text">${escapeHtml(modal.share.text)}</p>
     <p id="copy-status" class="hint"></p>
     <div class="stack">
-      <button class="btn btn-text" type="button" data-action="copy-share">Copy text</button>
+      <button class="btn btn-text" type="button" data-action="copy-share">Copy</button>
       ${modal.share.url ? `<a class="btn btn-primary" href="${modal.share.url}" download="lyric-trainer-score.png">Save image</a>` : ""}
     </div>
   ` : `<p>${escapeHtml(modal.body || "")}</p>`;
@@ -2470,7 +2470,7 @@ function paintHearts() {
   const root = document.querySelector("[data-testid=hearts]");
   const play = session.play;
   if (!root || !play) return;
-  root.setAttribute("aria-label", `${play.hearts} of ${play.maxHearts} lives`);
+  root.setAttribute("aria-label", `${play.hearts} of ${play.maxHearts} hearts`);
   root.querySelectorAll(".heart").forEach((heart, index) => {
     heart.classList.toggle("is-empty", index >= play.hearts);
   });
@@ -2499,7 +2499,7 @@ function judgePickedToken(button) {
     play.hearts = Math.max(0, play.hearts - 1);
     paintHearts();
     button.classList.add("is-reject");
-    if (question.kind === "order") showOrderStatus("Not that word. Try another.");
+    if (question.kind === "order") showOrderStatus("Try another word.");
     buzz(20);
     blip("bad", session.state.settings.sound);
     const failed = play.hearts <= 0;
@@ -2565,7 +2565,7 @@ function onClick(event) {
   const finder = clickTarget?.closest("#find-lyrics");
   if (finder?.dataset.disabled === "true") {
     event.preventDefault();
-    showFormError("Add a title and artist first.");
+    showFormError("Add a title and artist.");
     return;
   }
   const el = clickTarget?.closest("[data-action]");
@@ -2647,7 +2647,7 @@ function onClick(event) {
     const id = el.dataset.id;
     session.modal = {
       title: "Remove this player?",
-      body: "Their scores on this device are removed. Songs stay.",
+      body: "Their scores on this device go. Songs stay.",
       confirmLabel: "Remove",
       danger: true,
       onConfirm() { deletePlayer(id); }
@@ -2658,8 +2658,8 @@ function onClick(event) {
   else if (action === "restore-sample") restoreSample();
   else if (action === "ask-erase") {
     session.modal = {
-      title: "Erase everything?",
-      body: "Songs, scores, and players on this device are removed. The sample song comes back.",
+      title: "Erase this device?",
+      body: "Songs, scores, and players go. The sample song returns.",
       confirmLabel: "Erase",
       danger: true,
       onConfirm: eraseAll
@@ -2719,7 +2719,7 @@ async function startDeviceLink() {
     session.boardNaming = true;
     if (session.route.name !== "board") go("#/board");
     else render();
-    armToast("Save a display name first.");
+    armToast("Save a name first.");
     return;
   }
   const token = ++linkToken;
@@ -2735,7 +2735,7 @@ async function startDeviceLink() {
   if (token !== linkToken) return;
   session.linkBusy = false;
   if (!result.ok) {
-    session.linkError = result.error || "The code could not be created.";
+    session.linkError = result.error || "Could not make a code.";
     session.linkCode = "";
   } else {
     session.linkCode = result.code;
@@ -2762,7 +2762,7 @@ async function submitDeviceCode(raw) {
   if (token !== linkToken) return;
   session.linkBusy = false;
   if (!result.ok) {
-    session.linkError = result.error || "That code is not valid.";
+    session.linkError = result.error || "Code is not valid.";
     render();
     return;
   }
@@ -2770,7 +2770,7 @@ async function submitDeviceCode(raw) {
   absorbSharedProgress(result.progress);
   session.linkMode = "";
   session.boardNaming = false;
-  armToast(result.profile.name ? `Linked as ${result.profile.name}.` : "This device is linked.");
+  armToast(result.profile.name ? `Linked as ${result.profile.name}.` : "Linked.");
   if (session.route.name !== "board") go("#/board");
   else render();
 }
@@ -2788,7 +2788,7 @@ async function copyLinkCode() {
     document.execCommand("copy");
     area.remove();
   }
-  armToast("Code copied.");
+  armToast("Copied.");
 }
 
 function cancelModal() {
@@ -2810,7 +2810,7 @@ async function copyShare() {
     document.execCommand("copy");
     area.remove();
   }
-  if (status) status.textContent = "Copied. The card has the score, not the lyrics.";
+  if (status) status.textContent = "Copied. Score only, no lyrics.";
 }
 
 function onInput(event) {

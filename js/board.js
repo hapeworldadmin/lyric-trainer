@@ -7,7 +7,7 @@ import {
   snapshotFromProgress,
   validateBoardName,
   validDeviceId
-} from "./board-logic.js?v=15";
+} from "./board-logic.js?v=16";
 
 export const BOARD_ENDPOINT = "/.netlify/functions/leaderboard";
 
@@ -200,7 +200,7 @@ function boardCache(body) {
 }
 
 export async function createDeviceCode({ profile, fetchImpl = callBoard, now = Date.now() }) {
-  if (!profile?.name || !validDeviceId(profile.deviceId)) return { ok: false, error: "Save a display name first." };
+  if (!profile?.name || !validDeviceId(profile.deviceId)) return { ok: false, error: "Save a name first." };
   try {
     const response = await fetchImpl(BOARD_ENDPOINT, {
       method: "POST",
@@ -214,17 +214,17 @@ export async function createDeviceCode({ profile, fetchImpl = callBoard, now = D
       cache: "no-store"
     });
     const body = await readJson(response);
-    if (!response.ok) return { ok: false, status: response.status, error: body.error || "The code could not be created." };
+    if (!response.ok) return { ok: false, status: response.status, error: body.error || "Could not make a code." };
     const code = normalizeCode(body.code);
-    if (!code) return { ok: false, error: "The code could not be created." };
+    if (!code) return { ok: false, error: "Could not make a code." };
     return { ok: true, code, expiresAt: Number(body.expiresAt) || now + 10 * 60 * 1000 };
   } catch {
-    return { ok: false, error: "You are offline. Try again when you are connected." };
+    return { ok: false, error: "Offline. Try when you are connected." };
   }
 }
 
 export async function joinDevice({ profile, code, progress, library = [], fetchImpl = callBoard, now = Date.now() }) {
-  if (!validDeviceId(profile?.deviceId)) return { ok: false, error: "That device is not valid." };
+  if (!validDeviceId(profile?.deviceId)) return { ok: false, error: "Device is not valid." };
   const submission = buildSubmission(progress, profile, library);
   try {
     const response = await fetchImpl(BOARD_ENDPOINT, {
@@ -244,7 +244,7 @@ export async function joinDevice({ profile, code, progress, library = [], fetchI
     });
     const body = await readJson(response);
     if (!response.ok || !validDeviceId(body.playerId)) {
-      return { ok: false, status: response.status, error: body.error || "That code is not valid." };
+      return { ok: false, status: response.status, error: body.error || "Code is not valid." };
     }
     return {
       ok: true,
@@ -260,7 +260,7 @@ export async function joinDevice({ profile, code, progress, library = [], fetchI
       }
     };
   } catch {
-    return { ok: false, error: "You are offline. Try again when you are connected." };
+    return { ok: false, error: "Offline. Try when you are connected." };
   }
 }
 

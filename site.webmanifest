@@ -1,7 +1,7 @@
 {
   "name": "Know the Verse",
   "short_name": "Know the Verse",
-  "description": "Practice lyrics you paste yourself. Lyrics stay in this browser.",
+  "description": "Practice lyrics you paste. They stay in this browser.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

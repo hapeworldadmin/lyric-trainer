@@ -40,7 +40,7 @@ export function remoteRowsForRun(entry, concerts) {
 export function createDeviceProvider(getState, saveState) {
   return {
     source: "device",
-    sourceLabel: "On this device",
+    sourceLabel: "This device",
     async songScores({ concert }) {
       const state = getState();
       const rows = [];

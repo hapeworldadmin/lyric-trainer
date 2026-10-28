@@ -263,7 +263,7 @@ export function buildExport(state) {
     version: 1,
     kind: "lyric-trainer-progress",
     exportedAt: new Date().toISOString(),
-    note: "Scores only. This file intentionally contains no lyrics.",
+    note: "Scores only. No lyrics.",
     activePlayerId: state.activePlayerId,
     players: (state.players || []).map((player) => ({ id: player.id, name: player.name })),
     progress,

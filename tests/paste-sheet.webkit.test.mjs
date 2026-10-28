@@ -136,7 +136,7 @@ test("webkit paste reads the clipboard inside the click and previews from a past
     await box.waitFor();
     assert.equal(await page.getByTestId("paste-debug").innerText(), "Error");
     await page.getByTestId("paste-hint").waitFor();
-    assert.equal(await page.getByTestId("paste-hint").innerText(), "Press Cmd+V (or long-press, Paste)");
+    assert.equal(await page.getByTestId("paste-hint").innerText(), "Cmd+V, or long-press Paste");
     assert.equal(await page.getByTestId("use-fallback").isHidden(), true);
     assert.equal(await box.evaluate((el) => el === document.activeElement), true);
 
@@ -250,7 +250,7 @@ test("webkit word order accepts number keys and Enter, and ignores keys in a fie
     assert.equal(await page.getByTestId("order-status").getAttribute("role"), "status");
     assert.equal(look.crumb.size, "12px");
     assert.equal(look.crumb.weight, "600");
-    assert.match(look.crumb.text, /Word order/);
+    assert.match(look.crumb.text, /Order/);
     assert.equal(look.heart.width, "16px");
     assert.equal(look.heart.height, "16px");
     assert.equal(look.heart.color, "rgb(255, 77, 109)");
@@ -287,7 +287,7 @@ test("webkit word order accepts number keys and Enter, and ignores keys in a fie
       }
       return null;
     });
-    assert.equal(miss?.text, "Not that word. Try another.");
+    assert.equal(miss?.text, "Try another word.");
     assert.equal(miss?.role, "status");
     await page.waitForFunction(() => document.querySelector("[data-testid=order-status]")?.textContent === "");
     await page.goto(`http://127.0.0.1:${keyboardPort}/#/play/sample-banana-flashlight/order`, { waitUntil: "domcontentloaded" });
@@ -296,7 +296,7 @@ test("webkit word order accepts number keys and Enter, and ignores keys in a fie
     await page.waitForTimeout(400);
     await page.keyboard.press("Enter");
     await page.locator("#play-note").waitFor();
-    assert.match(await page.locator("#play-note").innerText(), /Place every word first/);
+    assert.match(await page.locator("#play-note").innerText(), /Place each word/);
     assert.equal(await page.getByTestId("feedback").count(), 0);
 
     await page.goto(`http://127.0.0.1:${keyboardPort}/#/me`, { waitUntil: "domcontentloaded" });
@@ -367,12 +367,12 @@ test("webkit first round mixes a short fade, and line order is still not section
       assert.equal(songText.includes("Flow"), false);
       assert.equal(songText.includes("Tap the opening lines"), false);
       assert.equal(songText.includes("Tricky lines"), false);
-      assert.match(await page.getByTestId("chapter-progress").innerText(), /0 of 4 rounds/);
+      assert.match(await page.getByTestId("chapter-progress").innerText(), /0\/4 rounds/);
       assert.match(await page.getByTestId("game-round").first().innerText(), /Fade/);
       assert.match(await page.getByTestId("game-round").nth(1).innerText(), /Locked/);
       assert.equal(await page.getByTestId("game-round").nth(1).isDisabled(), true);
       assert.equal(await page.getByTestId("game-concert").isDisabled(), true);
-      assert.equal(songText.match(/Finish the previous round/g)?.length || 0, 1);
+      assert.equal(songText.match(/Finish the round before/g)?.length || 0, 1);
       assert.equal(await page.getByTestId("nav-home").evaluate((el) => el.classList.contains("is-on")), false);
       const tabBar = await page.locator(".tabbar").evaluate((el) => getComputedStyle(el).backgroundColor);
       assert.equal(tabBar, "rgba(11, 11, 15, 0.72)");
@@ -381,7 +381,7 @@ test("webkit first round mixes a short fade, and line order is still not section
       await page.goto(`${base}/#/play/sample-banana-flashlight/lines`, { waitUntil: "domcontentloaded" });
       await page.getByTestId("play").waitFor();
       const ask = await page.getByTestId("question").innerText();
-      assert.match(ask, /tap the lines in order/i);
+      assert.match(ask, /lines in order/i);
       assert.equal(ask.includes("opening lines"), false);
       assert.equal(await page.getByText("The order appears here").count(), 0);
       assert.doesNotMatch(await page.locator(".play-crumb").innerText(), /Flow/);
@@ -411,9 +411,9 @@ test("webkit first round mixes a short fade, and line order is still not section
       assert.equal(fadeText.includes(SAMPLE_SONG.lines[1]), false);
       assert.match(await page.getByTestId("fade-line").innerText(), /found/);
       assert.equal(fadeText.includes(SAMPLE_SONG.lines[0]), false);
-      assert.match(await page.getByTestId("fade-pass").innerText(), /Some words hidden/);
-      assert.match(await page.getByTestId("fade-advance").innerText(), /Reveal next word/);
-      assert.match(await page.getByTestId("question").innerText(), /say the missing words/i);
+      assert.match(await page.getByTestId("fade-pass").innerText(), /Some hidden/);
+      assert.match(await page.getByTestId("fade-advance").innerText(), /Show word/);
+      assert.match(await page.getByTestId("question").innerText(), /missing words/i);
       const fadeBarAfter = await page.locator(".lesson-bar > span").evaluate((el) => parseFloat(el.style.width) || 0);
       assert.ok(fadeBarAfter > fadeBarBefore, `fade bar ${fadeBarBefore} -> ${fadeBarAfter}`);
       const hiddenBefore = await page.getByTestId("fade-blank").count();
@@ -423,11 +423,11 @@ test("webkit first round mixes a short fade, and line order is still not section
       let hops = 0;
       while (hops < 24) {
         const ask = await page.locator("body").innerText();
-        if (/put the words in order/i.test(ask)) break;
+        if (/words in order/i.test(ask)) break;
         await page.keyboard.press("Enter");
         hops += 1;
       }
-      assert.match(await page.locator("body").innerText(), /put the words in order/i);
+      assert.match(await page.locator("body").innerText(), /words in order/i);
       assert.equal((await page.locator("body").innerText()).includes(SAMPLE_SONG.lines[2]), false);
       assert.equal(await page.locator(".btn-primary").count(), 1);
 
@@ -435,7 +435,7 @@ test("webkit first round mixes a short fade, and line order is still not section
       await page.getByTestId("think-show").waitFor();
       assert.equal(await page.locator(".btn-primary").count(), 1);
       assert.equal(await page.getByTestId("hearts").count(), 0);
-      assert.match(await page.getByTestId("think-place").innerText(), /Verse · line 1 of \d+/);
+      assert.match(await page.getByTestId("think-place").innerText(), /Verse · line 1\/\d+/);
       assert.equal((await page.locator("body").innerText()).includes(SAMPLE_SONG.lines[0]), false);
       await page.keyboard.press("Enter");
       await page.getByTestId("think-got").waitFor();
@@ -446,7 +446,7 @@ test("webkit first round mixes a short fade, and line order is still not section
       await page.keyboard.press("2");
       await page.getByTestId("think-show").waitFor();
       thinkText = await page.locator("body").innerText();
-      assert.match(await page.getByTestId("question").innerText(), /recall the next line/i);
+      assert.match(await page.getByTestId("question").innerText(), /next line/i);
       assert.equal(thinkText.includes(SAMPLE_SONG.lines[0]), true);
       assert.equal(thinkText.includes(SAMPLE_SONG.lines[1]), false);
       assert.equal(thinkText.includes(SAMPLE_SONG.lines[2]), false);

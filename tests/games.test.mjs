@@ -148,7 +148,7 @@ test("line order checks ids, and repeated sections stay distinct", () => {
   assert.equal(lineQuestion.tokens.length, 2);
   assert.equal(isOrderCorrect(lineQuestion, lineQuestion.tokens.map((token) => token.id)), true);
   assert.equal(isOrderCorrect(lineQuestion, [...lineQuestion.tokens].reverse().map((token) => token.id)), false);
-  assert.match(lineQuestion.context.rangeLabel, /lines 3–4 of 4/);
+  assert.match(lineQuestion.context.rangeLabel, /3–4\/4/);
   assert.equal(lineQuestion.context.previous, lines[1]);
   assert.equal(lineQuestion.context.next, "");
   assert.equal(gameAvailability(lines.slice(0, 2), ["Verse", "Verse"]).lines, true);
