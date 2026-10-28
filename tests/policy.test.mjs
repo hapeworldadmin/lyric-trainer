@@ -46,8 +46,9 @@ test("the repo does not bundle real lyric-site hosts or the sample lines outside
       assert.equal(text.includes("XMLHttp" + "Request"), false, relative);
       const fetches = text.match(/fetch\s*\(/g) || [];
       if (fetches.length) {
-        assert.match(text, /concerts\.json/);
-        assert.equal(fetches.length, 1, `${relative} should only read concerts.json`);
+        const concerts = text.includes("concerts.json") && fetches.length === 1;
+        const board = text.includes("/.netlify/functions/leaderboard") && fetches.length === 1 && !text.includes("concerts.json");
+        assert.equal(concerts || board, true, `${relative} should only read concerts.json or the shared score board`);
       }
     }
   }

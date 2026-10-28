@@ -920,6 +920,56 @@ iframe[title*="Netlify"] {
   display: none !important;
 }
 
+.tone-board .btn-primary {
+  box-shadow: none;
+  background: var(--violet);
+  color: #0b0b0f;
+}
+.board-you {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 16px;
+  margin: 8px 0 16px;
+}
+.board-you-name {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.board-rank {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--violet);
+}
+.board-filters button[aria-pressed="true"] {
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--violet);
+}
+.board-score {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+}
+.board-score span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+.set-row.is-you {
+  box-shadow: inset 2px 0 0 var(--violet);
+}
+.board-name input {
+  font-size: 16px;
+  min-height: 48px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation: none !important;
