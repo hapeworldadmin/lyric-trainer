@@ -6,18 +6,18 @@ export const GAMES = [
   { id: "fade", name: "Fade", detail: "Hide more words", group: "main" },
   { id: "think", name: "Think", detail: "Recall, then check", group: "main" },
   { id: "lines", name: "Build", detail: "Order the lines", group: "main" },
-  { id: "next", name: "Next line", detail: "What comes next", group: "main" },
+  { id: "next", name: "Next", detail: "What comes next", group: "main" },
   { id: "concert", name: "Final run", detail: "Full song, timed", group: "main" },
-  { id: "fill", name: "Fill the blank", detail: "One missing word", group: "warm" },
-  { id: "order", name: "Word order", detail: "Rebuild one line", group: "warm" },
-  { id: "letters", name: "First letters", detail: "From first letters", group: "warm" }
+  { id: "fill", name: "Fill", detail: "One missing word", group: "warm" },
+  { id: "order", name: "Order", detail: "Rebuild one line", group: "warm" },
+  { id: "letters", name: "Letters", detail: "From first letters", group: "warm" }
 ];
 
 export const CHAPTERS = [
   { id: "fade", name: "Fade", detail: "Hide more words" },
   { id: "think", name: "Think", detail: "Recall, then check" },
   { id: "lines", name: "Build", detail: "Order the lines" },
-  { id: "next", name: "Next line", detail: "What comes next" },
+  { id: "next", name: "Next", detail: "What comes next" },
   { id: "concert", name: "Final run", detail: "Full song, timed" }
 ];
 
