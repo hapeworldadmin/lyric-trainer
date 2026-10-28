@@ -1,5 +1,5 @@
 import { bestSongMatch, concertsForSong } from "./concerts.js?v=11";
-import { songStats } from "./progress.js?v=11";
+import { songStats } from "./progress.js?v=12";
 import { clip, safeConcertId, songKey } from "./text.js?v=9";
 
 const GAMES = new Set(["fill", "order", "next", "letters", "concert", "lines", "fade", "think", "round"]);

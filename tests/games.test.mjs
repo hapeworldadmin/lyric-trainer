@@ -311,11 +311,14 @@ test("mastered rounds are skipped and the final run still covers them", () => {
   assert.equal(plan[0].status, "open");
   assert.equal(plan[1].status, "locked");
   assert.equal(plan[2].id, "concert");
-  assert.equal(plan[2].status, "locked");
+  assert.equal(plan[2].status, "open");
   const played = chapterPlan(lines, sections, { rounds: { [listed[0].id]: { completed: true } } });
   assert.equal(played[0].status, "done");
   assert.equal(played[1].status, "open");
-  assert.equal(played[2].status, "locked");
+  assert.equal(played[2].status, "open");
+  const finishedFinal = chapterPlan(lines, sections, { chapters: { concert: true } });
+  assert.equal(finishedFinal.at(-1).status, "done");
+  assert.equal(finishedFinal[1].status, "locked");
   const fresh = nextPractice(lines, sections, {});
   assert.equal(fresh.gameId, "round");
   assert.equal(fresh.roundId, listed[0].id);

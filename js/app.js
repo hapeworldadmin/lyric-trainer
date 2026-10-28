@@ -20,11 +20,12 @@ import {
   nextPractice,
   pointsFor,
   questionSeconds,
+  roundList,
   sectionProgress,
   seededRng,
   singingMatch,
   studyFrame
-} from "./games.js?v=14";
+} from "./games.js?v=15";
 import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=9";
 import {
   addBonusXp,
@@ -33,6 +34,7 @@ import {
   finishStreak,
   mergeImport,
   markChapter,
+  markSongMastered,
   masteredRoundIds,
   recordLineResult,
   recordRoundResult,
@@ -40,7 +42,7 @@ import {
   resetLineMasteryIfChanged,
   retitleSongProgress,
   songStats
-} from "./progress.js?v=11";
+} from "./progress.js?v=12";
 import { SAMPLE_SONG } from "./sample.js?v=9";
 import { createScoreProvider, sanitizeRun } from "./scores.js?v=11";
 import { drawShareCard, shareText } from "./share.js?v=9";
@@ -972,32 +974,52 @@ function viewResults() {
         ${section.done ? `<button class="btn btn-text" type="button" data-action="practice-again" data-round="${escapeHtml(section.roundId)}">Practice again</button>` : ""}
       `).join("")}
     </div>` : "";
-  const finalLocked = song ? chapterPlan(song.lines, song.sections || [], { chapters: stats?.chapters || {}, rounds: stats?.rounds || {} }).find((item) => item.id === "concert")?.status === "locked" : false;
   const bits = [];
   if (results.xp > 0) bits.push(`${results.xp} XP`);
   if (results.accuracy > 0) bits.push(`${results.accuracy}% accuracy`);
   if (results.streak > 0) bits.push(`<span data-testid="result-streak">${results.streak}</span> day streak`);
+  const mastered = Boolean(results.songMastered);
+  const back = mastered
+    ? `<a class="back" data-testid="back-to-song" href="#/song/${encodeURIComponent(results.songId)}">${icon("back")} Back</a>`
+    : "";
   return `
-    <section class="screen">
+    <section class="screen" data-testid="results">
+      ${back}
       <header class="page-head">
-        <p class="kicker">${results.songMastered ? "Song mastered" : (results.newBest ? "New best" : "Round complete")}</p>
+        <p class="kicker">${mastered ? "Song mastered" : (results.newBest ? "New best" : "Round complete")}</p>
         <h1 data-testid="final-score">${formatScore(results.score)}</h1>
         <p class="sub">${escapeHtml(results.title)} · ${escapeHtml(results.artist)}</p>
       </header>
       <p class="sub" data-testid="hearts-left">${results.hearts} hearts left</p>
       ${bits.length ? `<p class="sub">${bits.join(" · ")}</p>` : ""}
       <div class="dock">
-        <button class="btn btn-primary" type="button" data-action="keep-practicing" data-primary data-testid="keep-practicing">Keep practicing <span class="key-hint">Enter</span></button>
-        <button class="btn btn-secondary" type="button" data-action="toggle-sections" data-testid="practice-section">Practice a section</button>
-        ${open}
-        ${finalLocked
-          ? `<button class="btn btn-secondary" type="button" disabled data-testid="final-run">Final run</button>`
-          : `<a class="btn btn-secondary" data-testid="final-run" href="#/play/${encodeURIComponent(results.songId)}/concert">Final run</a>`}
-        <button class="btn btn-text" type="button" data-action="share-results" data-testid="share-score">Share my score</button>
-        <a class="btn btn-text" href="#/song/${encodeURIComponent(results.songId)}">Back to song</a>
-        ${nextLyricsLink(results.title, results.artist, "")}
+        ${resultActions(results, mastered, open)}
       </div>
     </section>
+  `;
+}
+
+function resultActions(results, mastered, sections) {
+  const finalRun = `<a class="btn btn-secondary" data-testid="final-run" href="#/play/${encodeURIComponent(results.songId)}/concert">Final run</a>`;
+  if (!mastered) {
+    return `
+      <button class="btn btn-primary" type="button" data-action="keep-practicing" data-primary data-testid="keep-practicing">Keep practicing <span class="key-hint">Enter</span></button>
+      <button class="btn btn-secondary" type="button" data-action="toggle-sections" data-testid="practice-section">Practice a section</button>
+      ${sections}
+      ${finalRun}
+      <button class="btn btn-text" type="button" data-action="share-results" data-testid="share-score">Share my score</button>
+      <a class="btn btn-text" href="#/song/${encodeURIComponent(results.songId)}">Back to song</a>
+      ${nextLyricsLink(results.title, results.artist, "")}
+    `;
+  }
+  const next = nextLyricsLink(results.title, results.artist, "", "primary");
+  const practicePrimary = next ? "" : " data-primary";
+  const practiceHint = next ? "" : ` <span class="key-hint">Enter</span>`;
+  return `
+    ${next}
+    ${finalRun}
+    <button class="btn ${next ? "btn-secondary" : "btn-primary"}" type="button" data-action="keep-practicing"${practicePrimary} data-testid="keep-practicing">Continue practicing${practiceHint}</button>
+    <button class="link-quiet" type="button" data-action="share-results" data-testid="share-score">Share my score</button>
   `;
 }
 
@@ -1612,7 +1634,7 @@ function confirmPaste() {
   go(`#/play/${encodeURIComponent(song.id)}/${lesson}`);
 }
 
-function nextLyricsLink(title, artist, concertId) {
+function nextLyricsLink(title, artist, concertId, variant = "outline") {
   const ids = [];
   if (concertId) ids.push(concertId);
   if (title && artist) {
@@ -1627,7 +1649,9 @@ function nextLyricsLink(title, artist, concertId) {
     const slot = summary.slots.find((item) => item.status === "needs-lyrics" && !(title && artist && songsMatch(item.title, item.artist, title, artist)));
     if (!slot) continue;
     const href = `#/add?title=${encodeURIComponent(slot.title)}&artist=${encodeURIComponent(slot.artist)}&concert=${encodeURIComponent(concert.id)}`;
-    return `<a class="btn btn-outline" data-testid="next-lyrics" href="${href}">Next song</a>`;
+    const primary = variant === "primary";
+    const hint = primary ? ` <span class="key-hint">Enter</span>` : "";
+    return `<a class="btn ${primary ? "btn-primary" : "btn-outline"}" data-testid="next-lyrics"${primary ? " data-primary" : ""} href="${href}">Next song${hint}</a>`;
   }
   return "";
 }
@@ -2126,10 +2150,15 @@ async function finishLesson() {
     addBonusXp(progress, song, bonus);
     play.xp += bonus;
   }
-  if (song && play.index >= play.questions.length - 1) markChapter(progress, song, play.gameId);
+  const finished = Boolean(song) && play.index >= play.questions.length - 1;
+  if (finished) markChapter(progress, song, play.gameId);
   const run = recordRun(progress, song, { score: play.score, gameId: play.gameId });
   const streak = finishStreak(progress);
+  if (finished && play.gameId === "concert" && songStats(progress, song).songMastered) {
+    markSongMastered(progress, song, roundList(song.lines, song.sections || []).map((item) => item.id));
+  }
   const stats = songStats(progress, song);
+  persist();
   const player = activePlayer(state);
   const entry = sanitizeRun({
     id: uid(),
