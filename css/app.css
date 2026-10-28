@@ -242,13 +242,30 @@ h2 {
   color: var(--ink);
   font-weight: 600;
 }
+.link-quiet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 12px;
+  padding: 8px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.link-quiet:active { transform: scale(0.98); }
+.screen > .back + .page-head { margin-top: 0; }
 .btn-text-on-hero { color: var(--ink); }
 .btn-danger { color: var(--bad); }
 .btn-small { width: auto; min-height: 44px; padding: 8px; font-size: 16px; }
 .btn:active, .game:active, .choice:active, .token:active, .row:active, .set-row:active {
   transform: scale(0.98);
 }
-.btn:focus-visible, .game:focus-visible, .choice:focus-visible, .token:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible {
+.btn:focus-visible, .game:focus-visible, .choice:focus-visible, .token:focus-visible, .link-quiet:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
 }

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildLesson } from "../js/games.js";
+import { buildLesson, chapterPlan, roundList } from "../js/games.js";
 import {
   buildExport,
   emptyProgress,
+  markChapter,
+  markSongMastered,
   masteredRoundIds,
   mergeImport,
   nextStreak,
@@ -143,6 +145,32 @@ test("round mastery persists for the same lyrics and is skipped next time", () =
   assert.equal(skipped.some((question) => question.roundId === first.roundId), false);
   const stored = JSON.stringify(JSON.parse(mem.get("lyric-trainer-v1")).progress);
   for (const line of SAMPLE_SONG.lines) assert.equal(stored.includes(line), false);
+});
+
+test("a finished final run marks every chapter and section mastered", () => {
+  const progress = emptyProgress();
+  const sample = { ...song, sections: [...SAMPLE_SONG.sections] };
+  const rounds = roundList(sample.lines, sample.sections);
+  assert.ok(rounds.length > 1);
+  recordRoundResult(progress, sample, { roundId: rounds[0].id, mistakes: 2, completed: true });
+  assert.equal(songStats(progress, sample).rounds[rounds[0].id].mastered, false);
+  markChapter(progress, sample, "concert");
+  recordRun(progress, sample, { score: 40, gameId: "concert" });
+  assert.equal(songStats(progress, sample).songMastered, true);
+  markSongMastered(progress, sample, [...rounds.map((item) => item.id), "not a round"]);
+  const stats = songStats(progress, sample);
+  for (const id of ["fade", "think", "lines", "next", "concert"]) {
+    assert.equal(stats.chapters[id], true, id);
+  }
+  assert.equal(stats.rounds["not a round"], undefined);
+  for (const spec of rounds) {
+    assert.equal(stats.rounds[spec.id].mastered, true, spec.id);
+    assert.equal(stats.rounds[spec.id].completed, true, spec.id);
+  }
+  assert.equal(stats.rounds[rounds[0].id].mistakes, 2);
+  assert.equal(stats.rounds[rounds[0].id].seen, 1);
+  const plan = chapterPlan(sample.lines, sample.sections, { chapters: stats.chapters, rounds: stats.rounds });
+  assert.ok(plan.every((item) => item.status === "done"));
 });
 
 test("saved progress survives a fresh load", () => {

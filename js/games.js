@@ -947,7 +947,6 @@ export function chapterPlan(lines, sections = [], cleared = {}) {
   const concert = CHAPTERS.find((chapter) => chapter.id === "concert");
   let concertStatus = "open";
   if (!specs.length || !gameAvailability(lines, sections).concert) concertStatus = "unavailable";
-  else if (waiting) concertStatus = "locked";
   else if (chapters.concert) concertStatus = "done";
   rounds.push({
     ...concert,
