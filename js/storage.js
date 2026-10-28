@@ -92,7 +92,11 @@ function hydrate(raw) {
   state.settings = {
     sound: raw.settings?.sound !== false,
     privacySeen: Boolean(raw.settings?.privacySeen),
-    installPrompted: Boolean(raw.settings?.installPrompted)
+    installPrompted: Boolean(raw.settings?.installPrompted),
+    sing: raw.settings?.sing === true,
+    singWarned: Boolean(raw.settings?.singWarned),
+    cantSing: Boolean(raw.settings?.cantSing),
+    answerMode: raw.settings?.answerMode === "type" ? "type" : "tiles"
   };
   return state;
 }

@@ -40,6 +40,8 @@ import {
   masteredRoundIds,
   recordLineResult,
   recordRoundResult,
+  putRecall,
+  recallMap,
   recordRun,
   retitleSongProgress,
   songStats
@@ -57,6 +59,22 @@ import {
   seedSample
 } from "./storage.js?v=16";
 import { createLineRecognizer, speechRecognitionSupported } from "./speech.js?v=11";
+import {
+  armAudit,
+  beginAudit,
+  buildRecallQuestion,
+  choiceCorrect,
+  createRun,
+  currentStep,
+  finishReveal,
+  judgeRecallTile,
+  missRun,
+  passRun,
+  recallSingMatch,
+  singRetry,
+  typedCorrect
+} from "./recall.js?v=16";
+import { recallPlayHtml } from "./recall-ui.js?v=16";
 import { completenessWarnings, mergeWithNext, prepareImportedText, presetFor, relabelBlock, SECTION_PRESETS, splitAtLine } from "./sections.js?v=16";
 import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=16";
 import { interpretHearing } from "./voice.js?v=11";
@@ -274,6 +292,7 @@ function sync() {
   if (session.route.name !== "play") {
     stopTimer();
     stopListening();
+    clearRecallTimer();
   }
   if (session.route.name === "add" || session.route.name === "edit") ensureForm();
   if (session.route.name === "results" && !session.results) {
@@ -680,6 +699,10 @@ function viewSong() {
         ${meter(stats.masteryPercent)}
       </div>
       ${links ? `<p class="sub">On the setlist: ${links}</p>` : ""}
+      <div class="stack">
+        <a class="btn btn-primary" data-testid="start-run" href="#/play/${encodeURIComponent(song.id)}/run?section=1">Run</a>
+        <a class="btn btn-text" data-testid="start-warmup" href="#/play/${encodeURIComponent(song.id)}/warmup?section=1">Warm-up</a>
+      </div>
       <p class="kicker">Rounds</p>
       <div class="game-list">${chapters}</div>
       ${plan.some((chapter) => chapter.status === "locked") ? `<p class="chapter-note" data-testid="chapter-lock-note">Finish the previous round</p>` : ""}
@@ -694,6 +717,7 @@ function viewSong() {
 function viewPlay() {
   const play = session.play;
   if (!play) return `<section class="screen"><p>That lesson is over.</p></section>`;
+  if (play.engine === "recall") return viewRecall();
   ensureStudy();
   const question = play.questions[play.index];
   const meterNow = lessonMeter(play, question);
@@ -734,6 +758,7 @@ function viewPlay() {
           ${parts.tray}
         </div>
       </div>
+      ${play.warmup ? `<button class="btn btn-text" type="button" data-action="skip-warmup" data-testid="skip-warmup">Skip</button>` : ""}
       ${dock ? `<div class="answer-dock" data-testid="answer-dock">${dock}</div>` : ""}
     </section>
   `;
@@ -1385,6 +1410,8 @@ function viewMe() {
         <button class="btn btn-text" type="button" data-action="pick-import" data-testid="import-progress">Import progress</button>
         <input id="import-file" type="file" accept="application/json,.json" hidden>
         <button class="btn btn-text" type="button" data-action="toggle-sound">${state.settings.sound ? "Sound on" : "Sound off"}</button>
+        <button class="btn btn-text" type="button" data-action="toggle-sing" data-testid="sing-toggle">${state.settings.sing ? "Singing on" : "Singing off"}</button>
+        <p class="fine">Singing stays off until you turn it on. Word tiles are the main way to answer.</p>
         <button class="btn btn-text" type="button" data-action="restore-sample">Restore sample song</button>
         <button class="btn btn-text btn-danger" type="button" data-action="ask-erase">Erase everything on this device</button>
       </div>
@@ -1695,8 +1722,398 @@ function showFormError(message) {
   if (el) el.textContent = message;
 }
 
+let recallTimer = 0;
+
+function clearRecallTimer() {
+  clearTimeout(recallTimer);
+  recallTimer = 0;
+}
+
+function recallSong() {
+  return findSong(session.play?.songId);
+}
+
+function paintRecallQuestion() {
+  const play = session.play;
+  const song = recallSong();
+  const step = currentStep(play?.run);
+  if (!play || !song || !step) return;
+  play.question = buildRecallQuestion(song, step, Math.random, { audit: play.run.audit });
+  play.placed = [];
+  play.heard = "";
+  play.typed = "";
+  play.rating = false;
+  play.flash = false;
+}
+
+function ensureRun() {
+  const song = findSong(session.route.songId);
+  if (!song) {
+    go("#/");
+    return false;
+  }
+  const sectionNumber = Math.max(1, Number(session.route.params.section) || 1);
+  const key = `${song.id}:run:${sectionNumber}`;
+  if (session.play?.key === key) return true;
+  stopListening();
+  clearRecallTimer();
+  const recall = recallMap(progressOf(session.state), song);
+  const run = createRun({ song, sectionNumber, recall, hearts: 5 });
+  if (!run.steps.length) {
+    armToast("That section needs more lines.");
+    go(`#/song/${encodeURIComponent(song.id)}`);
+    return false;
+  }
+  session.play = {
+    engine: "recall",
+    key,
+    songId: song.id,
+    mode: "run",
+    gameName: "Run",
+    sectionNumber,
+    run,
+    question: null,
+    placed: [],
+    answerMode: session.state.settings.answerMode === "type" ? "type" : "tiles",
+    typed: "",
+    heard: "",
+    notice: "",
+    rating: false,
+    flash: false,
+    listening: false,
+    singOn: Boolean(session.state.settings.sing) && !session.state.settings.cantSing,
+    voiceFails: 0
+  };
+  paintRecallQuestion();
+  return true;
+}
+
+function ensureWarmup() {
+  const song = findSong(session.route.songId);
+  if (!song) {
+    go("#/");
+    return false;
+  }
+  const sectionNumber = Math.max(1, Number(session.route.params.section) || 1);
+  const key = `${song.id}:warmup:${sectionNumber}`;
+  if (session.play?.key === key) return true;
+  stopListening();
+  const lines = [];
+  const labels = [];
+  const wanted = sectionIndexes(song, sectionNumber);
+  for (const index of wanted) {
+    lines.push(song.lines[index]);
+    labels.push(song.sections?.[index] || "Part");
+  }
+  const rng = Math.random;
+  const questions = [
+    ...buildLesson(lines, "fade", rng, labels),
+    ...buildLesson(lines, "think", rng, labels)
+  ];
+  if (!questions.length) {
+    go(`#/play/${encodeURIComponent(song.id)}/run?section=${sectionNumber}`);
+    return false;
+  }
+  session.play = {
+    key,
+    songId: song.id,
+    gameId: "fade",
+    gameName: "Warm-up",
+    warmup: true,
+    sectionNumber,
+    questions,
+    index: 0,
+    hearts: 0,
+    maxHearts: 0,
+    xp: 0,
+    score: 0,
+    correct: 0,
+    answered: 0,
+    combo: 0,
+    bestCombo: 0,
+    locked: false,
+    feedback: null,
+    picked: null,
+    typed: "",
+    listening: false,
+    voiceOff: true,
+    voiceRaw: "",
+    voiceDisplay: "",
+    fromVoice: false,
+    miss: null,
+    study: null,
+    order: null,
+    questionMistakes: 0,
+    roundMistakes: 0,
+    deadline: null,
+    finishing: false
+  };
+  return true;
+}
+
+function sectionIndexes(song, sectionNumber) {
+  const counts = new Map();
+  const indexes = [];
+  let number = 0;
+  let previous = null;
+  song.lines.forEach((line, index) => {
+    const label = song.sections?.[index] || "Part 1";
+    if (label !== previous) {
+      number += 1;
+      previous = label;
+    }
+    counts.set(index, number);
+  });
+  song.lines.forEach((_, index) => {
+    if (counts.get(index) === sectionNumber) indexes.push(index);
+  });
+  if (!indexes.length) song.lines.forEach((_, index) => indexes.push(index));
+  return indexes;
+}
+
+function viewRecall() {
+  const play = session.play;
+  play.heartIcon = icon("heart");
+  play.closeIcon = icon("close");
+  play.micIcon = icon("mic");
+  return recallPlayHtml(play);
+}
+
+function storedRecall(id) {
+  const song = recallSong();
+  if (!song) return null;
+  return recallMap(progressOf(session.state), song)[id] || null;
+}
+
+function commitRecall(result) {
+  const play = session.play;
+  const song = recallSong();
+  if (!play || !song || !result?.record) return;
+  const saved = putRecall(progressOf(session.state), song, result.record.id, result.record.patch);
+  if (result.record.xp) addBonusXp(progressOf(session.state), song, result.record.xp);
+  if (saved) persist();
+}
+
+function settleRecall(result) {
+  const play = session.play;
+  if (!play) return;
+  commitRecall(result);
+  play.run = result.state;
+  play.heard = "";
+  if (result.effect === "advance" || result.effect === "done") {
+    play.flash = true;
+    render();
+    clearRecallTimer();
+    recallTimer = setTimeout(() => {
+      if (session.play !== play) return;
+      play.flash = false;
+      if (play.run.status === "ask") paintRecallQuestion();
+      render();
+    }, motionDelay());
+    return;
+  }
+  if (result.effect === "rewind" || result.effect === "lost") {
+    play.question = play.question || {};
+    render();
+    clearRecallTimer();
+    recallTimer = setTimeout(() => {
+      if (session.play !== play) return;
+      play.run = finishReveal(play.run);
+      if (play.run.status === "ask") paintRecallQuestion();
+      render();
+    }, 1000);
+    return;
+  }
+  render();
+}
+
+function recallPass({ sung = false } = {}) {
+  const play = session.play;
+  const step = currentStep(play.run);
+  const result = passRun(play.run, { record: storedRecall(step.identity), sung, now: Date.now() });
+  blip("ok", session.state.settings.sound);
+  settleRecall(result);
+}
+
+function recallMiss() {
+  const play = session.play;
+  const step = currentStep(play.run);
+  const result = missRun(play.run, { record: storedRecall(step.identity), now: Date.now() });
+  blip("bad", session.state.settings.sound);
+  settleRecall(result);
+}
+
+function onRecallTile(id) {
+  const play = session.play;
+  if (!play || play.run.status !== "ask" || play.answerMode === "type") return;
+  const ok = judgeRecallTile(play.question, play.placed, id);
+  if (!ok) {
+    recallMiss();
+    return;
+  }
+  play.placed = [...play.placed, id];
+  if (play.placed.length >= play.question.solution.length) recallPass();
+  else render();
+}
+
+function onRecallChoice(index) {
+  const play = session.play;
+  const choice = play?.question?.choices?.[index];
+  if (!choice || play.run.status !== "ask") return;
+  if (choiceCorrect(play.question, choice)) recallPass();
+  else recallMiss();
+}
+
+function onRecallType(event) {
+  event?.preventDefault?.();
+  const play = session.play;
+  if (!play || play.run.status !== "ask") return;
+  const text = document.getElementById("answer-input")?.value ?? play.typed ?? "";
+  play.typed = text;
+  if (typedCorrect(play.question, text)) recallPass();
+  else recallMiss();
+}
+
+function onRecallShow() {
+  const play = session.play;
+  if (!play?.question?.allowShow || play.run.status !== "ask") return;
+  play.rating = true;
+  render();
+}
+
+function onRecallRate(gotIt) {
+  const play = session.play;
+  if (!play) return;
+  play.rating = false;
+  if (!gotIt) {
+    recallMiss();
+    return;
+  }
+  if (armAudit(play.run, Math.random)) {
+    play.run = beginAudit(play.run);
+    paintRecallQuestion();
+    play.notice = "One quick check.";
+    render();
+    return;
+  }
+  recallPass();
+}
+
+function onRecallCantSing() {
+  const play = session.play;
+  if (!play) return;
+  stopListening();
+  session.state.settings.cantSing = true;
+  play.singOn = false;
+  play.answerMode = "tiles";
+  play.notice = "Using word tiles.";
+  play.heard = "";
+  persist();
+  render();
+}
+
+function onRecallTypeMode() {
+  const play = session.play;
+  if (!play) return;
+  play.answerMode = "type";
+  session.state.settings.answerMode = "type";
+  persist();
+  render();
+}
+
+function onRecallTileMode() {
+  const play = session.play;
+  if (!play) return;
+  play.answerMode = "tiles";
+  session.state.settings.answerMode = "tiles";
+  persist();
+  render();
+}
+
+function recallMic() {
+  const play = session.play;
+  if (!play?.singOn || play.run.status !== "ask") return;
+  if (!session.state.settings.singWarned) {
+    session.modal = {
+      title: "Singing",
+      body: "Singing uses Safari speech recognition, which may send audio to Apple. The app stores no audio.",
+      confirmLabel: "Continue",
+      onConfirm() {
+        session.state.settings.singWarned = true;
+        persist();
+        recallMic();
+      }
+    };
+    render();
+    return;
+  }
+  if (play.listening) {
+    stopListening();
+    play.listening = false;
+    render();
+    return;
+  }
+  const song = recallSong();
+  const next = createLineRecognizer({
+    expected: play.question?.answer || "",
+    vocabulary: song?.lines || [],
+    onTranscript(text) {
+      if (session.play !== play) return;
+      play.heard = text;
+      const live = document.querySelector("[data-testid=heard-note]");
+      if (live) live.textContent = text ? `Heard: ${text}` : "";
+    },
+    onDenied() { recallVoiceFallback(play); },
+    onUnsupported() { recallVoiceFallback(play); },
+    onEnd() {
+      if (session.play !== play || !play.listening) return;
+      play.listening = false;
+      const heard = (play.heard || "").trim();
+      if (!heard) {
+        recallVoiceFallback(play);
+        return;
+      }
+      if (recallSingMatch(play.question.answer, heard)) recallPass({ sung: true });
+      else {
+        const result = singRetry(play.run, storedRecall(currentStep(play.run).identity), Date.now());
+        play.heard = heard;
+        if (result.effect === "retry") {
+          play.run = result.state;
+          play.notice = "";
+          render();
+          return;
+        }
+        settleRecall(result);
+      }
+    }
+  });
+  if (!next) {
+    recallVoiceFallback(play);
+    return;
+  }
+  ear = next;
+  play.listening = true;
+  next.start();
+  render();
+}
+
+function recallVoiceFallback(play) {
+  if (session.play !== play) return;
+  stopListening();
+  play.listening = false;
+  play.voiceFails = (play.voiceFails || 0) + 1;
+  if (play.voiceFails >= 2) {
+    play.singOn = false;
+    play.answerMode = "tiles";
+    play.notice = "Switched to word tiles.";
+  } else play.notice = "Singing missed. Tiles are ready.";
+  render();
+}
+
 function ensurePlay() {
   const route = session.route;
+  if (route.gameId === "run") return ensureRun();
+  if (route.gameId === "warmup") return ensureWarmup();
   const song = findSong(route.songId);
   const game = GAMES.find((item) => item.id === route.gameId);
   if (!song || !game) {
@@ -1765,7 +2182,10 @@ function ensurePlay() {
 }
 
 function currentQuestion() {
-  return session.play?.questions[session.play.index];
+  const play = session.play;
+  if (!play) return null;
+  if (play.engine === "recall") return play.question;
+  return play.questions?.[play.index] || null;
 }
 
 function ensureOrder() {
@@ -2130,6 +2550,10 @@ function continueLesson() {
   if (!play) return;
   stopListening();
   if (play.hearts <= 0 || play.index >= play.questions.length - 1) {
+    if (play.warmup) {
+      go(`#/play/${encodeURIComponent(play.songId)}/run?section=${play.sectionNumber || 1}`);
+      return;
+    }
     finishLesson();
     return;
   }
@@ -2689,7 +3113,32 @@ function onClick(event) {
   else if (action === "think-show") showThinkLine();
   else if (action === "think-rate") rateThinkTap(el.dataset.rate !== "missed");
   else if (action === "show-answer") revealSingAnswer();
-  else if (action === "check") {
+  else if (action === "skip-warmup") {
+    const play = session.play;
+    if (play?.warmup) go(`#/play/${encodeURIComponent(play.songId)}/run?section=${play.sectionNumber || 1}`);
+  } else if (action === "recall-tile") onRecallTile(el.dataset.token);
+  else if (action === "recall-choice") onRecallChoice(Number(el.dataset.choice));
+  else if (action === "recall-show") onRecallShow();
+  else if (action === "recall-rate") onRecallRate(el.dataset.rate !== "missed");
+  else if (action === "recall-cant-sing") onRecallCantSing();
+  else if (action === "recall-type-mode") onRecallTypeMode();
+  else if (action === "recall-tile-mode") onRecallTileMode();
+  else if (action === "recall-mic") recallMic();
+  else if (action === "recall-retry") {
+    if (session.play) {
+      session.play.heard = "";
+      render();
+    }
+  } else if (action === "recall-done") {
+    const id = session.play?.songId;
+    session.play = null;
+    go(id ? `#/song/${encodeURIComponent(id)}` : "#/");
+  } else if (action === "toggle-sing") {
+    session.state.settings.sing = !session.state.settings.sing;
+    if (session.state.settings.sing) session.state.settings.cantSing = false;
+    persist();
+    render();
+  } else if (action === "check") {
     if (currentQuestion()?.sing) judgeSing();
     else submitCurrent();
   }
@@ -2917,7 +3366,8 @@ function onInput(event) {
 function onSubmit(event) {
   if (event.target.id === "answer-form") {
     event.preventDefault();
-    if (currentQuestion()?.sing) judgeSing();
+    if (session.play?.engine === "recall") onRecallType(event);
+    else if (currentQuestion()?.sing) judgeSing();
     else submitCurrent();
   } else if (event.target.id === "player-form") {
     event.preventDefault();

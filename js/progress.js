@@ -184,6 +184,27 @@ export function retitleSongProgress(progressByPlayer, oldTitle, oldArtist, newTi
   }
 }
 
+export function recallMap(progress, song) {
+  const key = songKey(song.title, song.artist);
+  return progress?.songs?.[key]?.recall || {};
+}
+
+export function putRecall(progress, song, id, record) {
+  if (!isLineIdentity(id) || !record || typeof record !== "object") return null;
+  const row = ensureRow(progress, song);
+  row.recall[id] = {
+    level: Math.max(0, Math.min(4, Math.round(Number(record.level) || 0))),
+    due: Math.max(0, Math.round(Number(record.due) || 0)),
+    misses: Math.max(0, Math.round(Number(record.misses) || 0)),
+    lastPass: Math.max(0, Math.round(Number(record.lastPass) || 0)),
+    ladder: Math.max(0, Math.min(4, Math.round(Number(record.ladder) || 0))),
+    learned: Boolean(record.learned),
+    hardPass: Math.max(0, Math.round(Number(record.hardPass) || 0))
+  };
+  row.lastPlayedAt = new Date().toISOString();
+  return row.recall[id];
+}
+
 export function applyLineEdit(progressByPlayer, beforeSong, afterSong) {
   const summary = editSummary(beforeSong, afterSong);
   const key = songKey(afterSong.title, afterSong.artist);

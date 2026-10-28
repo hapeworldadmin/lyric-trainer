@@ -579,6 +579,25 @@ textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
   .btn .key-hint { margin: 0 0 0 8px; }
 }
 
+.recall-answer { min-height: 168px; }
+.recall-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.recall-tools .btn { width: auto; min-height: 44px; }
+.miss-flag {
+  margin: 0 0 8px;
+  color: var(--bad);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.play-screen.is-shake { animation: recall-shake 0.35s linear; }
+.play-screen.is-flash .lyric-line { opacity: 0.55; }
+@keyframes recall-shake {
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
 .timer { display: flex; align-items: center; gap: 8px; margin: 8px 0 16px; }
 .timer-track { flex: 1; height: 6px; border-radius: 999px; background: var(--line); }
 #timer-bar { width: 100%; transform-origin: left center; }
