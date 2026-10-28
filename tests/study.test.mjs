@@ -12,7 +12,6 @@ import {
   hiddenWordIndexes,
   initialThink,
   lineWindowSizes,
-  nextPractice,
   studyFrame
 } from "../js/games.js";
 import { displayToken, normalizeAnswer, tokenize } from "../js/text.js";
@@ -41,12 +40,15 @@ function assertHiddenFuture(frame) {
 }
 
 test("fade rounds hide more words each pass and never show a later line", () => {
-  assert.deepEqual(FADE_PASSES, ["full", "some", "mostly", "none"]);
+  assert.deepEqual(FADE_PASSES, ["full", "some", "half"]);
+  assert.deepEqual(hiddenWordIndexes(7, "full"), []);
+  assert.deepEqual(hiddenWordIndexes(7, "some"), [2, 5]);
+  assert.deepEqual(hiddenWordIndexes(7, "half"), [1, 3, 5]);
   const lesson = buildLesson(LINES, "fade", () => 0.2, SECTIONS);
   assert.ok(lesson.length >= 1);
   for (const question of lesson) {
     assert.equal(question.kind, "fade");
-    assert.ok(question.steps.length >= 2 && question.steps.length <= 6);
+    assert.ok(question.steps.length >= 2 && question.steps.length <= 4);
     assert.equal(question.context.next, "");
     assert.equal(question.roundId.startsWith("fade-"), true);
     const visible = exposedText(question);
@@ -56,8 +58,8 @@ test("fade rounds hide more words each pass and never show a later line", () => 
     const counts = FADE_PASSES.map((pass) => hiddenWordIndexes(tokenize(question.steps[0].text).length, pass).length);
     assert.deepEqual(counts, [...counts].sort((a, b) => a - b));
     assert.equal(counts[0], 0);
-    assert.equal(counts[3], tokenize(question.steps[0].text).length);
     assert.ok(counts[2] > counts[1]);
+    assert.ok(counts[2] < tokenize(question.steps[0].text).length);
 
     let state = { pass: 0, line: 0, revealed: 0 };
     const seen = [];
@@ -82,7 +84,7 @@ test("fade rounds hide more words each pass and never show a later line", () => 
   }
   const six = Array.from({ length: 6 }, (_, index) => `lantern round word ${index} stays here`);
   const oneRound = buildLesson(six, "fade", () => 0.4, six.map(() => "Verse"));
-  assert.deepEqual(oneRound.map((question) => question.steps.length), [6]);
+  assert.deepEqual(oneRound.map((question) => question.steps.length), [3, 3]);
   const seven = Array.from({ length: 7 }, (_, index) => `lantern round word ${index} stays here`);
   assert.deepEqual(lineWindowSizes(7), [4, 3]);
   assert.deepEqual(
@@ -166,23 +168,19 @@ test("think shows the previous line, hides the target until show, and replays a 
   assert.deepEqual(again.got, [0]);
 });
 
-test("mastered fade and think rounds are skipped and the final run still covers them", () => {
+test("mastered fade rounds are skipped and the final run still covers them", () => {
   const fade = buildLesson(LINES, "fade", () => 0.2, SECTIONS);
-  const think = buildLesson(LINES, "think", () => 0.2, SECTIONS);
   const skip = [fade[0].roundId];
   const rest = buildLesson(LINES, "fade", () => 0.2, SECTIONS, { skipIds: skip });
   assert.equal(rest.some((question) => question.roundId === skip[0]), false);
   assert.equal(rest.some((question) => question.roundId === fade[1].roundId), true);
   const again = buildLesson(LINES, "fade", () => 0.2, SECTIONS, { roundId: skip[0] });
   assert.ok(again.some((question) => question.roundId === skip[0]));
-  const rounds = {};
-  for (const question of fade) rounds[question.roundId] = { mastered: true };
-  assert.equal(nextPractice(LINES, SECTIONS, { rounds }).gameId, "think");
-  for (const question of think) rounds[question.roundId] = { mastered: true };
-  assert.equal(nextPractice(LINES, SECTIONS, { rounds }).gameId, "lines");
-  const concert = buildLesson(LINES, "concert", () => 0.2, SECTIONS, { skipIds: [...Object.keys(rounds)] });
+  const concert = buildLesson(LINES, "concert", () => 0.2, SECTIONS, { skipIds: skip });
   assert.equal(concert.reduce((sum, question) => sum + (question.span || 1), 0), LINES.length);
-  const plan = chapterPlan(LINES, SECTIONS, { fade: true, think: true });
-  assert.equal(plan.find((chapter) => chapter.id === "lines").status, "open");
-  assert.equal(plan.find((chapter) => chapter.id === "concert").status, "locked");
+  const plan = chapterPlan(LINES, SECTIONS, {});
+  assert.equal(plan.at(-1).id, "concert");
+  assert.equal(plan.at(-1).status, "locked");
+  assert.equal(plan[0].id, "round");
+  assert.equal(plan[0].status, "open");
 });

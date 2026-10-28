@@ -1,6 +1,6 @@
 # Know the Verse
 
-Know the Verse is a small, mobile-friendly game for memorizing song lyrics **you paste yourself**. Lessons follow the song: line order, next line, then a timed final run.
+Know the Verse is a small, mobile-friendly game for memorizing song lyrics **you paste yourself**. Each round is a few lines. Early rounds lean on reading the line. Later rounds lean on recall. A timed final run covers the whole song.
 
 It is a static site. There is no account and no server. Lyrics stay in your browser.
 
@@ -19,19 +19,15 @@ The only song included with the app is an original placeholder, **Banana Flashli
 
 ### Games
 
-The main path follows the song:
+A round is 3 or 4 lines from one section. A section of one or two lines stays that short. One round is the session, about a minute or two. Types rotate inside the round instead of filling a whole chapter with one game. Early rounds lean on Fade and word order. Later rounds lean on Think, next line, and singing.
 
-- **Fade** — read a short round with the previous line above it. Each pass hides more words (all, some, most, then none). Tap to reveal the next word.
-- **Think** — the previous line stays up. Recall the next line, tap Show, then mark Got it or Missed it. A miss comes back later in the round.
-- **Line order** — put a few lines back in order (about four to six at a time). The line above the group stays visible as a dimmed anchor.
-- **Next line** — choose the line that comes next.
+- **Fade** — read the line, with only the previous line above it. Two or three passes hide more words. Tap to reveal the next hidden word.
+- **Think** — the previous line stays up. Recall the next line, tap Show, then mark Got it or Missed it. A miss comes back once.
+- **Word order** — put one line's words back in order. Each tap is checked immediately.
+- **Next line** — choose the line that comes next. Some asks are sing-or-type, and Show choices switches that ask to buttons.
 - **Final run** — a timed pass through the whole song. Mastered rounds are skipped until this run.
 
-**Tricky lines** is a short warm-up: fill the blank, word order, and first letters.
-
-Fill the blank, word order, first letters, and next line show the previous line above the question and the next line below it, in a quieter style. The first line has no previous line, and the last line has no next line. When a section label was in the paste, the question also shows it and the position, such as `Chorus · line 12 of 40`. Line order shows only the line above the group, not the lines in the shuffle.
-
-Line order and word order check each tap immediately. An identical line can stand in for another with the same words. A wrong tap flashes and costs a heart, and the right one moves into the answer.
+The line you have not reached yet stays hidden. Context is the previous line only. The first line has no previous line. When a section label was in the paste, the question shows it and the position, such as `Chorus, line 12`. Word order checks each tap immediately. An identical line can stand in for another with the same words. A wrong tap flashes and costs a heart.
 
 ### Players, scores, and backup
 
