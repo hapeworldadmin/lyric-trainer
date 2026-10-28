@@ -1,5 +1,5 @@
 import { bestSongMatch, concertsForSong } from "./concerts.js?v=11";
-import { songStats } from "./progress.js?v=11";
+import { songStats } from "./progress.js?v=12";
 import { clip, safeConcertId, songKey } from "./text.js?v=9";
 
 const GAMES = new Set(["fill", "order", "next", "letters", "concert", "lines", "fade", "think", "round", "run", "boss", "daily", "full"]);
@@ -40,7 +40,7 @@ export function remoteRowsForRun(entry, concerts) {
 export function createDeviceProvider(getState, saveState) {
   return {
     source: "device",
-    sourceLabel: "On this device",
+    sourceLabel: "This device",
     async songScores({ concert }) {
       const state = getState();
       const rows = [];

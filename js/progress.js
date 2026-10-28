@@ -127,6 +127,22 @@ export function markChapter(progress, song, gameId) {
   return row.chapters;
 }
 
+export function markSongMastered(progress, song, roundIds = []) {
+  const row = ensureRow(progress, song);
+  for (const id of CHAPTER_IDS) row.chapters[id] = true;
+  for (const roundId of roundIds) {
+    if (!roundId || !/^[a-z0-9-]+$/i.test(roundId)) continue;
+    const prev = row.rounds[roundId] || { mistakes: 0, completed: false, mastered: false, seen: 0 };
+    row.rounds[roundId] = {
+      mistakes: Math.max(0, Math.round(Number(prev.mistakes) || 0)),
+      completed: true,
+      mastered: true,
+      seen: Math.max(0, Math.round(Number(prev.seen) || 0))
+    };
+  }
+  return { chapters: { ...row.chapters }, rounds: { ...row.rounds } };
+}
+
 export function recordLineResult(progress, song, { line, correct, xpGain }) {
   const row = ensureRow(progress, song);
   const key = lineKey(line);
@@ -413,7 +429,7 @@ export function buildExport(state) {
     version: 2,
     kind: "lyric-trainer-progress",
     exportedAt: new Date().toISOString(),
-    note: "Scores only. This file intentionally contains no lyrics.",
+    note: "Scores only. No lyrics.",
     activePlayerId: state.activePlayerId,
     players: (state.players || []).map((player) => ({ id: player.id, name: player.name })),
     progress,

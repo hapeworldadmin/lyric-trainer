@@ -1,4 +1,4 @@
-import { songStats } from "./progress.js?v=11";
+import { songStats } from "./progress.js?v=12";
 import { clip, normalizeAnswer, safeConcertId, slug, songKey, songsMatch } from "./text.js?v=9";
 
 export function normalizeConcerts(data) {
@@ -131,8 +131,8 @@ export function leaderboardFromSongScores(songScores, setlist) {
 }
 
 export function concertStatusLine(summary) {
-  if (!summary?.total) return "No setlist posted yet";
-  if (!summary.ready && !summary.mastered) return "Add lyrics to your first song";
+  if (!summary?.total) return "No setlist yet";
+  if (!summary.ready && !summary.mastered) return "Add the first lyrics";
   return `${summary.mastered}/${summary.total} mastered`;
 }
 

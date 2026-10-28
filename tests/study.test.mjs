@@ -89,12 +89,12 @@ test("fade rounds hide more words each pass and never show a later line", () => 
     assert.ok(late > 0.4, `fade progress ${late}`);
     assert.ok(late < 1);
   }
-  assert.equal(fadePassLabel("mostly"), "Hardest pass");
+  assert.equal(fadePassLabel("mostly"), "Hardest");
   const first = lesson[0];
   const hidden = studyFrame(first, { pass: 2, line: 0, revealed: 0 });
-  assert.equal(hidden.prompt, "Say the missing words");
-  assert.equal(hidden.action, "Reveal next word");
-  assert.equal(studyFrame(first, { pass: 0, line: 0, revealed: 0 }).prompt, "Read this line");
+  assert.equal(hidden.prompt, "Missing words");
+  assert.equal(hidden.action, "Show word");
+  assert.equal(studyFrame(first, { pass: 0, line: 0, revealed: 0 }).prompt, "Read");
   const six = Array.from({ length: 6 }, (_, index) => `lantern round word ${index} stays here`);
   const oneRound = buildLesson(six, "fade", () => 0.4, six.map(() => "Verse"));
   assert.deepEqual(oneRound.map((question) => question.steps.length), [3, 3]);
@@ -138,11 +138,11 @@ test("think shows the previous line, hides the target until show, and replays a 
   const frame = studyFrame(question, state);
   assert.equal(frame.target, "");
   assert.equal(frame.action, "Show");
-  assert.equal(frame.prompt, question.steps[0].previous ? "Recall the next line" : "Recall this line");
-  assert.equal(frame.place, `${question.context.section} · line 1 of ${question.steps.length}`);
+  assert.equal(frame.prompt, question.steps[0].previous ? "Next line" : "This line");
+  assert.equal(frame.place, `${question.context.section} · line 1/${question.steps.length}`);
   assertHiddenFuture(frame);
   const recalled = studyFrame(question, { ...state, queue: state.queue.slice(1) });
-  assert.equal(recalled.prompt, "Recall the next line");
+  assert.equal(recalled.prompt, "Next line");
   assert.equal(recalled.previous, question.steps[0].text);
   assert.equal(recalled.target, "");
   assertHiddenFuture(recalled);
@@ -171,7 +171,7 @@ test("think shows the previous line, hides the target until show, and replays a 
 
   const solo = buildLesson(["only lantern line here"], "think", () => 0, ["Verse"]);
   let again = initialThink(solo[0]);
-  assert.equal(studyFrame(solo[0], again).prompt, "Recall this line");
+  assert.equal(studyFrame(solo[0], again).prompt, "This line");
   assert.equal(studyFrame(solo[0], again).previous, "");
   again = applyThink(again, false);
   assert.equal(again.finished, false);
@@ -194,7 +194,7 @@ test("mastered fade rounds are skipped and the final run still covers them", () 
   assert.equal(concert.reduce((sum, question) => sum + (question.span || 1), 0), LINES.length);
   const plan = chapterPlan(LINES, SECTIONS, {});
   assert.equal(plan.at(-1).id, "concert");
-  assert.equal(plan.at(-1).status, "locked");
+  assert.equal(plan.at(-1).status, "open");
   assert.equal(plan[0].id, "round");
   assert.equal(plan[0].status, "open");
 });

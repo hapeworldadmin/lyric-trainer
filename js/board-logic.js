@@ -99,7 +99,7 @@ export function validateBoardName(value) {
   const name = normalizeBoardName(value);
   const length = [...name].length;
   if (length < BOARD_LIMITS.nameMin || length > BOARD_LIMITS.nameMax) {
-    return { ok: false, error: "Use 2 to 16 characters." };
+    return { ok: false, error: "Use 2–16 characters." };
   }
   if (!/^[\p{L}\p{N}](?:[\p{L}\p{N}' -]*[\p{L}\p{N}])?$/u.test(name) || /[' -]{2,}/.test(name)) {
     return { ok: false, error: "Use letters and numbers." };
@@ -245,11 +245,11 @@ export function progressSnapshot(progress) {
 
 export function sanitizeSubmission(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return { ok: false, error: "That score could not be read." };
+    return { ok: false, error: "Could not read that score." };
   }
   const name = validateBoardName(body.name);
   if (!name.ok) return name;
-  if (!validDeviceId(body.deviceId)) return { ok: false, error: "That device is not valid." };
+  if (!validDeviceId(body.deviceId)) return { ok: false, error: "Device is not valid." };
   const incoming = Array.isArray(body.songs) ? body.songs.slice(0, BOARD_LIMITS.maxSongs) : [];
   const byId = new Map();
   for (const row of incoming) {
@@ -743,14 +743,14 @@ async function handleLink({ body, ip, store, now }) {
   const name = validateBoardName(body?.name);
   const deviceId = validDeviceId(body?.deviceId) ? String(body.deviceId).toLowerCase() : "";
   if (!deviceId || !name.ok) {
-    return { status: 400, body: { error: name.ok ? "That device is not valid." : name.error } };
+    return { status: 400, body: { error: name.ok ? "Device is not valid." : name.error } };
   }
   const deviceHit = await charge(store, `link:${deviceId}`, BOARD_LIMITS.linkPerDevice, now, BOARD_LIMITS.codeWindowMs);
   if (!deviceHit.ok) return tooMany("link");
   const requested = validDeviceId(body?.playerId) ? String(body.playerId).toLowerCase() : deviceId;
   let prev = await store.get(playerKey(requested));
   if (!prev || !playerOwnsDevice(prev, deviceId)) {
-    if (requested !== deviceId || prev) return { status: 403, body: { error: "This device is not linked." } };
+    if (requested !== deviceId || prev) return { status: 403, body: { error: "Device is not linked." } };
   }
   const playerId = validDeviceId(prev?.deviceId) ? String(prev.deviceId).toLowerCase() : deviceId;
   if (!prev) {
@@ -763,7 +763,7 @@ async function handleLink({ body, ip, store, now }) {
     if (previous && !previous.used) await store.set(codeKey(pointer.code), { ...previous, used: true });
   }
   const code = await freshCode(store, now);
-  if (!code) return { status: 503, body: { error: "The code could not be created." } };
+  if (!code) return { status: 503, body: { error: "Could not make a code." } };
   const expiresAt = now + BOARD_LIMITS.codeTtlMs;
   await store.set(codeKey(code), { playerId, name: prev.name || name.name, expiresAt, used: false });
   await store.set(pointerKey(playerId), { code, expiresAt });
@@ -774,14 +774,14 @@ async function handleJoin({ body, ip, store, now }) {
   const ipHit = await charge(store, `join:ip:${ip || "anon"}`, BOARD_LIMITS.joinPerIp, now, BOARD_LIMITS.codeWindowMs);
   if (!ipHit.ok) return tooMany("join");
   const deviceId = validDeviceId(body?.deviceId) ? String(body.deviceId).toLowerCase() : "";
-  if (!deviceId) return { status: 400, body: { error: "That device is not valid." } };
+  if (!deviceId) return { status: 400, body: { error: "Device is not valid." } };
   const deviceHit = await charge(store, `join:${deviceId}`, BOARD_LIMITS.joinPerDevice, now, BOARD_LIMITS.codeWindowMs);
   if (!deviceHit.ok) return tooMany("join");
   const code = normalizeCode(body?.code);
-  if (!code) return { status: 400, body: { error: "That code is not valid." } };
+  if (!code) return { status: 400, body: { error: "Code is not valid." } };
   const ticket = await store.get(codeKey(code));
   if (!ticket || ticket.used || !Number.isFinite(Number(ticket.expiresAt)) || ticket.expiresAt <= now || !validDeviceId(ticket.playerId)) {
-    return { status: 400, body: { error: "That code is not valid." } };
+    return { status: 400, body: { error: "Code is not valid." } };
   }
   const hostId = String(ticket.playerId).toLowerCase();
   let host = await store.get(playerKey(hostId));
@@ -798,7 +798,7 @@ async function handleJoin({ body, ip, store, now }) {
   devices.add(String(host.deviceId).toLowerCase());
   devices.add(deviceId);
   if (devices.size > BOARD_LIMITS.maxDevices) {
-    return { status: 400, body: { error: "This name already has enough devices." } };
+    return { status: 400, body: { error: "This name has enough devices." } };
   }
   const posted = sanitizeSubmission({
     deviceId,
@@ -836,7 +836,7 @@ async function handleJoin({ body, ip, store, now }) {
 
 async function handlePull({ body, ip, store, now }) {
   const deviceId = validDeviceId(body?.deviceId) ? String(body.deviceId).toLowerCase() : "";
-  if (!deviceId) return { status: 400, body: { error: "That device is not valid." } };
+  if (!deviceId) return { status: 400, body: { error: "Device is not valid." } };
   const viewed = await charge(store, `get:${deviceId}`, BOARD_LIMITS.getPerDevice, now);
   if (!viewed.ok) return tooMany("get");
   if (ip) {
@@ -846,7 +846,7 @@ async function handlePull({ body, ip, store, now }) {
   const requested = validDeviceId(body?.playerId) ? String(body.playerId).toLowerCase() : deviceId;
   const prev = await store.get(playerKey(requested));
   if (!prev) return { status: 200, body: { linked: false, progress: progressForLibrary(null, []) } };
-  if (!playerOwnsDevice(prev, deviceId)) return { status: 403, body: { error: "This device is not linked." } };
+  if (!playerOwnsDevice(prev, deviceId)) return { status: 403, body: { error: "Device is not linked." } };
   return {
     status: 200,
     body: {
@@ -990,12 +990,12 @@ async function handleRestore({ body, store, now }) {
 
 function tooMany(kind) {
   const error = kind === "get"
-    ? "The board is busy. Try again later."
+    ? "Board is busy. Try later."
     : kind === "join"
-      ? "Too many code attempts. Wait a few minutes."
+      ? "Too many tries. Wait a few minutes."
       : kind === "link"
         ? "Too many codes. Wait a few minutes."
-        : "Too many updates. Try again later.";
+        : "Too many updates. Try later.";
   return { status: 429, body: { error } };
 }
 
@@ -1006,7 +1006,7 @@ function clientIp(ip) {
 export async function handleLeaderboard({ method, searchParams, body, ip, store, now = Date.now() }) {
   const verb = String(method || "").toUpperCase();
   if (verb !== "GET" && verb !== "POST") {
-    return { status: 405, body: { error: "That action is not available." } };
+    return { status: 405, body: { error: "That is not available." } };
   }
   const address = clientIp(ip);
   if (verb === "POST") {
@@ -1016,7 +1016,7 @@ export async function handleLeaderboard({ method, searchParams, body, ip, store,
     if (action === "link") return handleLink({ body, ip: address, store, now });
     if (action === "join") return handleJoin({ body, ip: address, store, now });
     if (action === "pull") return handlePull({ body, ip: address, store, now });
-    if (action) return { status: 400, body: { error: "That action is not available." } };
+    if (action) return { status: 400, body: { error: "That is not available." } };
     const verdict = sanitizeSubmission(body);
     if (!verdict.ok) {
       const blocked = await charge(store, `post:ip:${address || "anon"}`, BOARD_LIMITS.postPerIp, now);
@@ -1048,10 +1048,10 @@ export async function handleLeaderboard({ method, searchParams, body, ip, store,
     const key = playerKey(playerId);
     const prev = await store.get(key);
     if (prev && !playerOwnsDevice(prev, verdict.value.deviceId)) {
-      return { status: 403, body: { error: "This device is not linked." } };
+      return { status: 403, body: { error: "Device is not linked." } };
     }
     if (!prev && playerId !== verdict.value.deviceId) {
-      return { status: 403, body: { error: "This device is not linked." } };
+      return { status: 403, body: { error: "Device is not linked." } };
     }
     const next = mergePlayer(prev, { ...verdict.value, progress: body?.progress }, now);
     await store.set(key, next);
@@ -1132,13 +1132,13 @@ export function boardScreen({ profile, remote, local, songId = "", offline = fal
   }));
   const listed = rows.some((row) => row.you);
   let note = "";
-  if (!rank && score <= 0 && xp <= 0) note = "Finish a lesson to post a score.";
-  else if (!rank) note = "Your rank will show when the board loads.";
-  let status = "On the shared board.";
-  if (busy) status = remote ? "The board is busy. Showing the last one saved on this device." : "The board is busy. Your scores stay on this device.";
-  else if (offline && remote) status = "Showing the last shared board. New scores stay on this device until you are online.";
-  else if (offline) status = "Saved on this device. The shared board will load when you are online.";
-  else if (profile?.pending) status = "Saved on this device. It will reach the shared board when it can.";
+  if (!rank && score <= 0 && xp <= 0) note = "Finish a lesson to rank.";
+  else if (!rank) note = "Rank shows when the board loads.";
+  let status = "Shared board.";
+  if (busy) status = remote ? "Board is busy. Showing the saved copy." : "Board is busy. Scores stay here.";
+  else if (offline && remote) status = "Last saved board. New scores sync when you are online.";
+  else if (offline) status = "Saved here. The board loads when you are online.";
+  else if (profile?.pending) status = "Saved here. It syncs when it can.";
   return {
     name: profile?.name || "",
     selected,

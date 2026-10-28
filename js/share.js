@@ -3,10 +3,11 @@ export function shareText(card) {
   const title = String(card.title || "a song").trim();
   const score = Math.max(0, Math.round(Number(card.score) || 0));
   const streak = Math.max(0, Math.round(Number(card.streak) || 0));
-  const days = `${streak} day${streak === 1 ? "" : "s"}`;
+  const days = `${streak} ${streak === 1 ? "day" : "days"}`;
+  const tail = `${days} streak. Know the Verse.`;
   if (card.kind === "concert") {
     const detail = card.detail ? ` ${card.detail}.` : "";
-    return `${playerName} scored ${score} for ${title} in Know the Verse.${detail} Streak: ${days}.`;
+    return `${playerName} scored ${score} for ${title}.${detail} ${tail}`;
   }
   const artist = String(card.artist || "").trim();
   const by = artist ? ` by ${artist}` : "";
@@ -14,7 +15,7 @@ export function shareText(card) {
   const accuracy = Number.isFinite(Number(card.accuracy)) ? ` ${Math.round(Number(card.accuracy))}% correct.` : "";
   const elapsed = Math.round(Number(card.elapsed) || 0);
   const time = elapsed > 0 ? ` ${formatElapsed(elapsed)}.` : "";
-  return `${playerName} scored ${score} on "${title}"${by}${detail} in Know the Verse.${accuracy}${time} Streak: ${days}.`;
+  return `${playerName} scored ${score} on "${title}"${by}${detail}.${accuracy}${time} ${tail}`;
 }
 
 function formatElapsed(ms) {
@@ -54,7 +55,7 @@ export function drawShareCard(card) {
   ctx.fillStyle = "#a1a1aa";
   let y = 720;
   if (card.kind === "concert") {
-    ctx.fillText("Concert score", 96, y);
+    ctx.fillText("Concert", 96, y);
     y += 56;
   } else if (card.artist) {
     const artistLines = wrapText(ctx, card.artist, 888).slice(0, 2);
@@ -64,7 +65,7 @@ export function drawShareCard(card) {
     });
   }
   const streak = Math.max(0, Math.round(Number(card.streak) || 0));
-  const bits = [`${streak} day streak`, card.playerName || "You"];
+  const bits = [`${streak}-day streak`, card.playerName || "You"];
   if (Number.isFinite(Number(card.accuracy))) bits.unshift(`${Math.round(Number(card.accuracy))}%`);
   const elapsed = Math.round(Number(card.elapsed) || 0);
   if (elapsed > 0) bits.unshift(formatElapsed(elapsed));
