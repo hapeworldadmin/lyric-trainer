@@ -223,7 +223,7 @@ test("a failed sync keeps local progress and a later sync posts scores only", as
     cache: null
   };
   const submission = buildSubmission(local, profile);
-  assert.deepEqual(Object.keys(submission).sort(), ["deviceId", "name", "overallScore", "overallXp", "songs"]);
+  assert.deepEqual(Object.keys(submission).sort(), ["deviceId", "library", "name", "overallScore", "overallXp", "playerId", "progress", "songs"]);
   assert.deepEqual(Object.keys(submission.songs[0]).sort(), ["artist", "id", "score", "title", "xp"]);
   assert.equal(JSON.stringify(submission).includes(SENTINEL), false);
   assert.equal(submission.songs[0].id, "soft|lany");

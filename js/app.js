@@ -57,15 +57,21 @@ import { createLineRecognizer, speechRecognitionSupported } from "./speech.js?v=
 import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=11";
 import { interpretHearing } from "./voice.js?v=11";
 import {
+  applySharedProgress,
   boardScreen,
+  createDeviceCode,
+  ensureBoardDevice,
   fetchBoard,
+  joinDevice,
+  libraryFromSongs,
   loadBoardProfile,
   markScoresPending,
+  pullSharedProgress,
   pushScores,
   saveBoardName,
   saveBoardProfile,
   snapshotFromProgress
-} from "./board.js?v=14";
+} from "./board.js?v=15";
 
 const session = {
   state: null,
@@ -81,6 +87,13 @@ const session = {
   boardFilter: "",
   boardSong: "",
   boardNaming: false,
+  linkMode: "",
+  linkRoute: "",
+  linkCode: "",
+  linkExpiresAt: 0,
+  linkError: "",
+  linkBusy: false,
+  linkDraft: "",
   renaming: "",
   shareUrl: ""
 };
@@ -121,6 +134,7 @@ function providerFor() {
 }
 
 let boardSync = null;
+let linkToken = 0;
 
 function syncSharedBoard() {
   if (boardSync) return boardSync;
@@ -130,22 +144,38 @@ function syncSharedBoard() {
   return boardSync;
 }
 
+function librarySongs() {
+  return libraryFromSongs(session.state?.songs || []);
+}
+
+function absorbSharedProgress(payload) {
+  if (!payload || !session.state) return false;
+  const applied = applySharedProgress(progressOf(session.state), payload, librarySongs());
+  if (applied.changed) persist();
+  return applied.changed;
+}
+
 async function syncSharedBoardNow() {
   try {
     const profile = loadBoardProfile();
-    if (!profile.name || !profile.pending) return;
-    const result = await pushScores({
-      profile,
-      progress: progressOf(session.state),
-      now: Date.now()
-    });
-    saveBoardProfile(result.profile);
-    if (result.status === 400) {
+    if (!profile.name || !profile.deviceId) return;
+    const progress = progressOf(session.state);
+    const library = librarySongs();
+    let result;
+    if (profile.pending || !profile.progressAt) {
+      result = await pushScores({ profile, progress, library, now: Date.now() });
+      if (result.empty) result = await pullSharedProgress({ profile: result.profile, library });
+    } else {
+      result = await pullSharedProgress({ profile, library });
+    }
+    if (result?.profile) saveBoardProfile(result.profile);
+    const changed = absorbSharedProgress(result?.progress);
+    if (result?.status === 400 && profile.pending) {
       session.boardNaming = true;
       if (session.route.name === "board") armToast(result.error || "Choose a different name.");
     }
-    if (session.route.name === "board" && !session.boardNaming) render();
-    else if (session.route.name === "board" && result.status === 400) render();
+    const quiet = session.route.name === "play" || session.linkMode;
+    if (!quiet && (changed || session.route.name === "board")) render();
   } catch {
     // The lesson score is already stored on this device.
   }
@@ -1084,6 +1114,7 @@ function viewBoardName(profile) {
         <button class="btn btn-primary" type="submit" data-testid="board-save">Save name</button>
         ${back}
       </form>
+      <button class="btn btn-text" type="button" data-action="enter-code" data-testid="enter-code">I have a code</button>
       <p class="fine">No account and no password. Lyrics stay on this device.</p>
     </section>
   `;
@@ -1126,6 +1157,86 @@ function viewBoardList(model) {
       <div class="filters board-filters">${filters}</div>
       <div data-testid="board-list">${list}</div>
       <button class="btn btn-text" type="button" data-action="edit-board-name">Edit name</button>
+      ${linkActions()}
+    </section>
+  `;
+}
+
+function linkActions() {
+  const linked = loadBoardProfile().linked
+    ? `<p class="fine" data-testid="link-status">This device is linked.</p>`
+    : "";
+  return `
+    <div class="stack link-actions">
+      <button class="btn btn-text" type="button" data-action="link-device" data-testid="link-device">Link another device</button>
+      <button class="btn btn-text" type="button" data-action="enter-code" data-testid="enter-code">I have a code</button>
+      ${linked}
+    </div>
+  `;
+}
+
+function formatLinkCode(code) {
+  const clean = String(code || "");
+  if (clean.length !== 6) return clean;
+  return `${clean.slice(0, 3)} ${clean.slice(3)}`;
+}
+
+function linkExpiryCopy(expiresAt) {
+  if (!expiresAt) return "Works once, for about 10 minutes.";
+  const left = expiresAt - Date.now();
+  if (left <= 0) return "This code has expired.";
+  const minutes = Math.max(1, Math.ceil(left / 60000));
+  return minutes === 1 ? "Expires in 1 minute. Works once." : `Expires in ${minutes} minutes. Works once.`;
+}
+
+function viewLink() {
+  if (session.linkMode === "join") {
+    return `
+      <section class="screen link-panel" data-testid="link-join">
+        <header class="page-head">
+          <h1>I have a code</h1>
+        </header>
+        <p class="sub">Enter the code from your other device. Scores and lesson progress follow that player.</p>
+        <form id="link-code-form" class="stack">
+          <label class="field">Code
+            <input id="link-code-input" data-testid="link-code-input" type="text" name="device-code" inputmode="text" maxlength="12" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="ABC DEF" value="${escapeHtml(session.linkDraft || "")}">
+          </label>
+          <p id="link-code-error" class="error" role="alert">${escapeHtml(session.linkError || "")}</p>
+          <button class="btn btn-primary" type="submit" data-testid="link-submit" ${session.linkBusy ? "disabled" : ""}>Link</button>
+        </form>
+        <button class="btn btn-text" type="button" data-action="close-link">Back</button>
+        <p class="fine">Lyrics stay on each device. There is no account.</p>
+      </section>
+    `;
+  }
+  const expired = Boolean(session.linkCode) && session.linkExpiresAt > 0 && Date.now() >= session.linkExpiresAt;
+  let primary = `<button class="btn btn-primary" type="button" disabled>Creating a code…</button>`;
+  if (!session.linkBusy && session.linkError && !session.linkCode) {
+    primary = `<button class="btn btn-primary" type="button" data-action="link-device" data-testid="link-retry">Try again</button>`;
+  } else if (!session.linkBusy && expired) {
+    primary = `<button class="btn btn-primary" type="button" data-action="link-device" data-testid="link-retry">New code</button>`;
+  } else if (!session.linkBusy && session.linkCode) {
+    primary = `<button class="btn btn-primary" type="button" data-action="copy-link-code" data-testid="copy-link-code">Copy code</button>`;
+  }
+  const code = session.linkCode && !session.linkBusy
+    ? `<p class="link-code" data-testid="link-code">${escapeHtml(formatLinkCode(session.linkCode))}</p>`
+    : "";
+  const detail = session.linkError && !session.linkCode
+    ? `<p class="error" role="alert">${escapeHtml(session.linkError)}</p>`
+    : session.linkCode
+      ? `<p class="sub" data-testid="link-expiry">${escapeHtml(linkExpiryCopy(session.linkExpiresAt))}</p>`
+      : "";
+  return `
+    <section class="screen link-panel" data-testid="link-create">
+      <header class="page-head">
+        <h1>Link another device</h1>
+      </header>
+      <p class="sub">Same player, same scores, same lesson progress. On the other device, choose I have a code.</p>
+      ${code}
+      ${detail}
+      ${primary}
+      <button class="btn btn-text" type="button" data-action="close-link">Back</button>
+      <p class="fine">The code works once. Lyrics are not sent.</p>
     </section>
   `;
 }
@@ -1144,6 +1255,7 @@ function boardRow(row) {
 }
 
 async function viewBoard() {
+  if (session.linkMode && session.linkRoute !== "me") return viewLink();
   const profile = loadBoardProfile();
   if (!profile.name || session.boardNaming) return viewBoardName(profile);
   const local = snapshotFromProgress(progressOf(session.state));
@@ -1153,7 +1265,10 @@ async function viewBoard() {
   try {
     remote = await fetchBoard({ deviceId: profile.deviceId, songId: session.boardSong || "" });
     const latest = loadBoardProfile();
-    if (!latest.pending) saveBoardProfile({ ...latest, cache: remote });
+    const next = { ...latest };
+    if (!latest.pending) next.cache = remote;
+    if (typeof remote?.you?.linked === "boolean") next.linked = remote.you.linked;
+    saveBoardProfile(next);
   } catch (error) {
     offline = true;
     busy = error?.status === 429;
@@ -1170,6 +1285,7 @@ async function viewBoard() {
 }
 
 function viewMe() {
+  if (session.linkMode && session.linkRoute === "me") return viewLink();
   const state = session.state;
   const player = activePlayer(state);
   const progress = progressOf(state);
@@ -1221,6 +1337,9 @@ function viewMe() {
         <button class="btn btn-primary" type="submit">Add player</button>
       </form>
       <div>${players}</div>
+      <p class="kicker">Devices</p>
+      <p class="sub">Link a phone and a computer. Scores and lesson progress follow the current player. No account.</p>
+      ${linkActions()}
       <p class="kicker">Progress file</p>
       <p class="sub">Export is scores, mastery counts, and streaks only. It does not include lyrics.</p>
       <div class="stack">
@@ -2557,11 +2676,119 @@ function onClick(event) {
     render();
   } else if (action === "edit-board-name") {
     session.boardNaming = true;
+    session.linkMode = "";
     render();
   } else if (action === "cancel-board-name") {
     session.boardNaming = false;
     render();
+  } else if (action === "link-device") {
+    void startDeviceLink();
+  } else if (action === "enter-code") {
+    openDeviceCode();
+  } else if (action === "close-link") {
+    closeLink();
+  } else if (action === "copy-link-code") {
+    void copyLinkCode();
   }
+}
+
+function openDeviceCode() {
+  linkToken += 1;
+  session.linkRoute = session.route.name === "me" ? "me" : "board";
+  session.linkMode = "join";
+  session.linkError = "";
+  session.linkBusy = false;
+  session.linkCode = "";
+  session.linkDraft = "";
+  if (session.route.name !== "board" && session.route.name !== "me") go("#/board");
+  else render();
+}
+
+function closeLink() {
+  linkToken += 1;
+  session.linkMode = "";
+  session.linkBusy = false;
+  session.linkError = "";
+  render();
+}
+
+async function startDeviceLink() {
+  const profile = loadBoardProfile();
+  if (!profile.name) {
+    session.linkMode = "";
+    session.boardNaming = true;
+    if (session.route.name !== "board") go("#/board");
+    else render();
+    armToast("Save a display name first.");
+    return;
+  }
+  const token = ++linkToken;
+  session.linkRoute = session.route.name === "me" ? "me" : "board";
+  session.linkMode = "create";
+  session.linkCode = "";
+  session.linkExpiresAt = 0;
+  session.linkError = "";
+  session.linkBusy = true;
+  render();
+  const ready = ensureBoardDevice();
+  const result = await createDeviceCode({ profile: ready });
+  if (token !== linkToken) return;
+  session.linkBusy = false;
+  if (!result.ok) {
+    session.linkError = result.error || "The code could not be created.";
+    session.linkCode = "";
+  } else {
+    session.linkCode = result.code;
+    session.linkExpiresAt = result.expiresAt;
+    session.linkError = "";
+  }
+  render();
+}
+
+async function submitDeviceCode(raw) {
+  const token = ++linkToken;
+  session.linkDraft = raw;
+  session.linkBusy = true;
+  session.linkError = "";
+  render();
+  const profile = ensureBoardDevice();
+  const result = await joinDevice({
+    profile,
+    code: raw,
+    progress: progressOf(session.state),
+    library: librarySongs(),
+    now: Date.now()
+  });
+  if (token !== linkToken) return;
+  session.linkBusy = false;
+  if (!result.ok) {
+    session.linkError = result.error || "That code is not valid.";
+    render();
+    return;
+  }
+  saveBoardProfile(result.profile);
+  absorbSharedProgress(result.progress);
+  session.linkMode = "";
+  session.boardNaming = false;
+  armToast(result.profile.name ? `Linked as ${result.profile.name}.` : "This device is linked.");
+  if (session.route.name !== "board") go("#/board");
+  else render();
+}
+
+async function copyLinkCode() {
+  const code = session.linkCode || "";
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = code;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  armToast("Code copied.");
 }
 
 function cancelModal() {
@@ -2587,6 +2814,7 @@ async function copyShare() {
 }
 
 function onInput(event) {
+  if (event.target.id === "link-code-input") session.linkDraft = event.target.value;
   if (event.target.id === "answer-input") {
     const value = event.target.value;
     if (session.play) {
@@ -2631,6 +2859,10 @@ function onSubmit(event) {
     session.boardNaming = false;
     render();
     void syncSharedBoard();
+  } else if (event.target.id === "link-code-form") {
+    event.preventDefault();
+    if (session.linkBusy) return;
+    submitDeviceCode(document.getElementById("link-code-input")?.value || "");
   }
 }
 
