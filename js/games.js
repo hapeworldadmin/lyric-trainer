@@ -2,23 +2,23 @@ import { inferSections } from "./parse.js?v=9";
 import { contentKey, displayToken, mulberry32, normalizeAnswer, normalizeSing, shuffle, tokenize, wordCount } from "./text.js?v=11";
 
 export const GAMES = [
-  { id: "round", name: "Round", detail: "A short mix of a few lines", group: "main" },
-  { id: "fade", name: "Fade", detail: "Read the line, then hide more words", group: "main" },
-  { id: "think", name: "Think", detail: "Recall the next line, then check", group: "main" },
-  { id: "lines", name: "Build", detail: "Line order in short rounds", group: "main" },
-  { id: "next", name: "Next line", detail: "Recall what comes next", group: "main" },
-  { id: "concert", name: "Final run", detail: "Timed run through the song", group: "main" },
-  { id: "fill", name: "Fill the blank", detail: "A short warm-up on one word", group: "warm" },
-  { id: "order", name: "Word order", detail: "Rebuild one line", group: "warm" },
-  { id: "letters", name: "First letters", detail: "Pick the line from first letters", group: "warm" }
+  { id: "round", name: "Round", detail: "A few lines", group: "main" },
+  { id: "fade", name: "Fade", detail: "Hide more words", group: "main" },
+  { id: "think", name: "Think", detail: "Recall, then check", group: "main" },
+  { id: "lines", name: "Build", detail: "Order the lines", group: "main" },
+  { id: "next", name: "Next", detail: "What comes next", group: "main" },
+  { id: "concert", name: "Final run", detail: "Full song, timed", group: "main" },
+  { id: "fill", name: "Fill", detail: "One missing word", group: "warm" },
+  { id: "order", name: "Order", detail: "Rebuild one line", group: "warm" },
+  { id: "letters", name: "Letters", detail: "From first letters", group: "warm" }
 ];
 
 export const CHAPTERS = [
-  { id: "fade", name: "Fade", detail: "Read the line, then hide more words" },
-  { id: "think", name: "Think", detail: "Recall the next line, then check" },
-  { id: "lines", name: "Build", detail: "Line order in short rounds" },
-  { id: "next", name: "Next line", detail: "Recall what comes next" },
-  { id: "concert", name: "Final run", detail: "Timed run through the song" }
+  { id: "fade", name: "Fade", detail: "Hide more words" },
+  { id: "think", name: "Think", detail: "Recall, then check" },
+  { id: "lines", name: "Build", detail: "Order the lines" },
+  { id: "next", name: "Next", detail: "What comes next" },
+  { id: "concert", name: "Final run", detail: "Full song, timed" }
 ];
 
 const STOP = new Set("a an the and or but if to of in on for at by from with it my we you he she they i is was were".split(" "));
@@ -251,11 +251,11 @@ function stampRounds(questions) {
 export const FADE_PASSES = ["full", "some", "half"];
 
 const FADE_PASS_LABELS = {
-  full: "All words",
-  some: "Some words hidden",
-  half: "Half the words hidden",
-  mostly: "Hardest pass",
-  none: "All words hidden"
+  full: "Full line",
+  some: "Some hidden",
+  half: "Half hidden",
+  mostly: "Hardest",
+  none: "All hidden"
 };
 
 export function fadePassLabel(pass) {
@@ -356,7 +356,7 @@ function makeStudyRound(kind, lines, block, start, end) {
       total: lines.length,
       previous: start > 0 ? lines[start - 1] : "",
       next: "",
-      rangeLabel: `${block.label} · lines ${start + 1}–${end} of ${lines.length}`
+      rangeLabel: `${block.label} · ${start + 1}–${end}/${lines.length}`
     }
   };
 }
@@ -400,8 +400,8 @@ export function studyFrame(question, state = {}) {
       line,
       lineCount: steps.length,
       done: view.done,
-      action: view.done ? "Next" : "Reveal next word",
-      prompt: view.done ? "Read this line" : "Say the missing words",
+      action: view.done ? "Next" : "Show word",
+      prompt: view.done ? "Read" : "Missing words",
       future: steps.slice(line + 1).map((item) => item.text)
     };
   }
@@ -415,8 +415,8 @@ export function studyFrame(question, state = {}) {
     const section = String(question.context?.section || "").trim();
     const count = Math.max(steps.length, 1);
     const place = section
-      ? `${section} · line ${stepIndex + 1} of ${count}`
-      : `line ${stepIndex + 1} of ${count}`;
+      ? `${section} · line ${stepIndex + 1}/${count}`
+      : `Line ${stepIndex + 1}/${count}`;
     return {
       kind: "think",
       previous: current.previous || "",
@@ -425,8 +425,8 @@ export function studyFrame(question, state = {}) {
       phase,
       place,
       prompt: phase === "rate"
-        ? "Did you have it?"
-        : (current.previous ? "Recall the next line" : "Recall this line"),
+        ? "Mark it"
+        : (current.previous ? "Next line" : "This line"),
       action: phase === "rate" ? "Got it" : "Show",
       future: queue.slice(1).map((item) => item.text),
       currentId: current.id
@@ -519,7 +519,7 @@ function makeLineWindow(lines, block, start, end, rng) {
       total: lines.length,
       previous: start > 0 ? lines[start - 1] : "",
       next: "",
-      rangeLabel: `${block.label} · lines ${start + 1}–${end} of ${lines.length}`
+      rangeLabel: `${block.label} · ${start + 1}–${end}/${lines.length}`
     }
   };
 }
@@ -865,10 +865,16 @@ export function describeMix(questions) {
   for (const question of questions || []) {
     const label = question.sing
       ? "Sing"
-      : { fade: "Fade", think: "Think", order: "Word order", next: "Next line" }[question.kind];
+      : { fade: "Fade", think: "Think", order: "Order", next: "Next", lines: "Lines" }[question.kind];
     if (label && !labels.includes(label)) labels.push(label);
   }
   return labels.join(", ");
+}
+
+function chapterDetail(spec, questions) {
+  const range = `${spec.start + 1}–${spec.end}`;
+  const mix = describeMix(questions);
+  return mix ? `${range} · ${mix}` : range;
 }
 
 export function questionTaps(question) {
@@ -932,7 +938,7 @@ export function chapterPlan(lines, sections = [], cleared = {}) {
       id: "round",
       roundId: spec.id,
       name: spec.label,
-      detail: `Lines ${spec.start + 1}–${spec.end} · ${describeMix(questions)}`,
+      detail: chapterDetail(spec, questions),
       stage: spec.stage,
       status,
       done: status === "done"

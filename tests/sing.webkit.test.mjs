@@ -149,9 +149,9 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
       assert.equal(idleText.includes(question.answer), false);
       assert.equal(await page.getByTestId("context-previous").innerText(), question.prompt);
       assert.equal(await page.getByTestId("context-next").count(), 0);
-      assert.match(await page.getByTestId("question").innerText(), /sing or type the next line/i);
+      assert.match(await page.getByTestId("question").innerText(), /sing or type/i);
       assert.equal(await page.locator(".btn-primary").count(), 1);
-      assert.equal(await page.getByTestId("cant-sing").innerText(), "Show choices");
+      assert.equal(await page.getByTestId("cant-sing").innerText(), "Choices");
       assert.equal(await page.getByTestId("sing-input").getAttribute("placeholder"), null);
       const hierarchy = await page.evaluate(() => {
         const lyric = getComputedStyle(document.querySelector("[data-testid=context-previous]"));
@@ -258,7 +258,7 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
       assert.equal(await page.getByTestId("sing-input").count(), 0);
       assert.equal(await page.getByTestId("mic").count(), 0);
       assert.equal(await page.getByTestId("context-next").count(), 0);
-      assert.match(await page.locator("body").innerText(), /what comes next\?/i);
+      assert.match(await page.locator("body").innerText(), /next line/i);
       assert.equal(await page.locator(".btn-primary").count(), 0);
       const choiceText = await page.locator(".choice").allInnerTexts();
       assert.equal(choiceText.some((choice) => choice.includes(question.answer)), true);
@@ -296,7 +296,7 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
     assert.equal(await gradePage.getByTestId("sing-input").count(), 1);
     assert.equal(await gradePage.getByTestId("feedback").count(), 0);
     assert.match(await gradePage.locator("#sing-field").evaluate((el) => el.className), /is-wrong/);
-    assert.match(await gradePage.getByTestId("sing-miss").innerText(), /Not quite, try again/);
+    assert.match(await gradePage.getByTestId("sing-miss").innerText(), /Try again/);
     assert.equal(await gradePage.getByTestId("show-answer").count(), 0);
     await gradePage.evaluate(() => {
       document.addEventListener("submit", () => {
@@ -327,7 +327,7 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
     await plainPage.getByTestId("sing-input").waitFor();
     assert.equal(await plainPage.getByTestId("mic").count(), 0);
     assert.equal(await plainPage.locator(".error, .toast").count(), 0);
-    assert.match(await plainPage.getByTestId("question").innerText(), /type the next line/i);
+    assert.match(await plainPage.getByTestId("question").innerText(), /type the line/i);
     assert.equal(await plainPage.getByTestId("cant-sing").count(), 0);
     await plain.close();
 
@@ -345,7 +345,7 @@ test("webkit sing or type questions on iPhone and Mac", async (t) => {
     await deniedPage.getByTestId("mic").waitFor({ state: "detached" });
     assert.equal(await deniedPage.getByTestId("sing-input").count(), 1);
     assert.equal(await deniedPage.locator(".error, .toast").count(), 0);
-    assert.match(await deniedPage.getByTestId("question").innerText(), /type the next line/i);
+    assert.match(await deniedPage.getByTestId("question").innerText(), /type the line/i);
     await deniedPage.getByTestId("sing-input").fill(heard);
     await deniedPage.keyboard.press("Enter");
     await deniedPage.getByTestId("feedback").waitFor();
@@ -406,7 +406,7 @@ test("webkit screenshots keep lyrics and controls distinct on iPhone and Mac", a
       await page.getByTestId("sing-input").fill("still nope nope nope");
       await page.getByTestId("check").click();
       await page.getByTestId("show-answer").waitFor();
-      assert.match(await page.getByTestId("sing-miss").innerText(), /Not quite, try again/);
+      assert.match(await page.getByTestId("sing-miss").innerText(), /Try again/);
       const wrongBorder = await page.locator(".sing-row .sing-input").evaluate((el) => getComputedStyle(el).borderTopColor);
       assert.equal(wrongBorder, "rgb(255, 77, 109)");
       await page.screenshot({ path: path.join(shots, `sing-wrong-${viewport.name}.png`) });
@@ -471,7 +471,7 @@ test("webkit screenshots keep lyrics and controls distinct on iPhone and Mac", a
       });
       assert.equal(orderLook.size, "22px");
       assert.equal(orderLook.weight, "700");
-      assert.match(orderLook.label, /Put the words in order/);
+      assert.match(orderLook.label, /Words in order/);
       await page.screenshot({ path: path.join(shots, `word-order-${viewport.name}.png`) });
       await context.close();
     }

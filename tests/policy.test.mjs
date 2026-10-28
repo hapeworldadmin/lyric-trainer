@@ -76,5 +76,5 @@ test("share text is score, title, and streak", () => {
     detail: "0 of 0 songs mastered"
   });
   assert.match(concert, /LANY Soft World Tour/);
-  assert.match(concert, /1 day\./);
+  assert.match(concert, /1 day streak/);
 });
