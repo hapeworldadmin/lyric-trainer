@@ -2,6 +2,7 @@ import { inferSections } from "./parse.js?v=9";
 import { contentKey, displayToken, mulberry32, normalizeAnswer, normalizeSing, shuffle, tokenize, wordCount } from "./text.js?v=11";
 
 export const GAMES = [
+  { id: "round", name: "Round", detail: "A short mix of a few lines", group: "main" },
   { id: "fade", name: "Fade", detail: "Read the line, then hide more words", group: "main" },
   { id: "think", name: "Think", detail: "Recall the next line, then check", group: "main" },
   { id: "lines", name: "Build", detail: "Line order in short rounds", group: "main" },
@@ -85,6 +86,7 @@ export function gameAvailability(lines, sections = []) {
   const list = lines || [];
   const blocks = sectionBlocks(list, sections);
   return {
+    round: list.some((line) => tokenize(line).length >= 1),
     fill: list.some((line) => chooseBlank(tokenize(line), () => 0)),
     order: list.some((line) => tokenize(line).length >= 3),
     next: list.length >= 3,
@@ -98,7 +100,7 @@ export function gameAvailability(lines, sections = []) {
 
 export function firstLessonId(lines, sections = []) {
   const availability = gameAvailability(lines, sections);
-  for (const id of ["fade", "think", "lines", "next", "fill", "letters", "order"]) {
+  for (const id of ["round", "fade", "think", "lines", "next", "fill", "letters", "order"]) {
     if (availability[id]) return id;
   }
   return "letters";
@@ -209,19 +211,25 @@ function shuffleTokens(tokens, rng) {
 
 export function lineWindowSizes(total) {
   if (total < 2) return [];
-  if (total <= 6) return [total];
-  let parts = Math.ceil(total / 6);
-  while (parts > 1 && total / parts < 3) parts -= 1;
-  while (Math.ceil(total / parts) > 6) parts += 1;
-  const base = Math.floor(total / parts);
-  let extra = total % parts;
+  if (total <= 4) return [total];
   const sizes = [];
-  for (let index = 0; index < parts; index += 1) {
-    sizes.push(base + (extra > 0 ? 1 : 0));
-    if (extra > 0) extra -= 1;
-  }
-  if (sizes.length > 1 && sizes[sizes.length - 1] < 3) {
-    sizes[sizes.length - 2] += sizes.pop();
+  let left = total;
+  while (left > 0) {
+    if (left <= 4) {
+      sizes.push(left);
+      break;
+    }
+    if (left === 5) {
+      sizes.push(3, 2);
+      break;
+    }
+    if (left === 6) {
+      sizes.push(3, 3);
+      break;
+    }
+    const take = left % 4 === 1 ? 3 : 4;
+    sizes.push(take);
+    left -= take;
   }
   return sizes;
 }
@@ -240,11 +248,12 @@ function stampRounds(questions) {
   });
 }
 
-export const FADE_PASSES = ["full", "some", "mostly", "none"];
+export const FADE_PASSES = ["full", "some", "half"];
 
 const FADE_PASS_LABELS = {
   full: "All words",
   some: "Some words hidden",
+  half: "Half the words hidden",
   mostly: "Hardest pass",
   none: "All words hidden"
 };
@@ -256,15 +265,16 @@ export function fadePassLabel(pass) {
 export function fadeLessonFraction(question, state = {}) {
   const steps = question?.steps || [];
   const count = Math.max(1, steps.length);
-  const passes = FADE_PASSES.length;
+  const passes = passesFor(question);
+  const total = Math.max(1, passes.length);
   if (state?.finished) return 1;
-  const pass = Math.max(0, Math.min(passes - 1, state?.pass || 0));
+  const pass = Math.max(0, Math.min(total - 1, state?.pass || 0));
   const line = Math.max(0, Math.min(count - 1, state?.line || 0));
   const text = steps[line]?.text || "";
-  const hidden = hiddenWordIndexes(tokenize(text).length, FADE_PASSES[pass]).length;
+  const hidden = hiddenWordIndexes(tokenize(text).length, passes[pass]).length;
   const revealed = Math.max(0, state?.revealed || 0);
   const linePart = hidden ? Math.min(1, revealed / hidden) : 0;
-  return (pass * count + line + linePart) / (passes * count);
+  return (pass * count + line + linePart) / (total * count);
 }
 
 export function hiddenWordIndexes(count, pass) {
@@ -276,6 +286,26 @@ export function hiddenWordIndexes(count, pass) {
     for (let index = 2; index < total; index += 3) hidden.push(index);
     if (!hidden.length && total > 1) hidden.push(total - 1);
     if (hidden.length >= total && hidden.length) hidden.pop();
+    return hidden;
+  }
+  if (pass === "mostly") {
+    if (total === 1) return [0];
+    return Array.from({ length: total - 1 }, (_, index) => index + 1);
+  }
+  if (pass === "half") {
+    const hidden = [];
+    for (let index = 1; index < total; index += 2) hidden.push(index);
+    if (total > 1) {
+      const someCount = hiddenWordIndexes(total, "some").length;
+      let cursor = 0;
+      while (hidden.length <= someCount && hidden.length < total - 1 && cursor < total) {
+        if (!hidden.includes(cursor)) hidden.push(cursor);
+        cursor += 1;
+      }
+      hidden.sort((a, b) => a - b);
+    } else if (!hidden.length) {
+      hidden.push(0);
+    }
     return hidden;
   }
   if (total === 1) return [0];
@@ -345,20 +375,27 @@ function studyLesson(lines, sections, kind) {
   return stampRounds(questions);
 }
 
+function passesFor(question) {
+  const passes = question?.passes;
+  if (Array.isArray(passes) && passes.length) return passes;
+  return FADE_PASSES;
+}
+
 export function studyFrame(question, state = {}) {
   if (!question) return null;
   if (question.kind === "fade") {
     const steps = question.steps || [];
-    const passIndex = Math.max(0, Math.min(FADE_PASSES.length - 1, state.pass || 0));
+    const passes = passesFor(question);
+    const passIndex = Math.max(0, Math.min(passes.length - 1, state.pass || 0));
     const line = Math.max(0, Math.min(Math.max(steps.length - 1, 0), state.line || 0));
     const step = steps[line];
     if (!step) return null;
-    const view = fadeView(step.text, FADE_PASSES[passIndex], state.revealed || 0);
+    const view = fadeView(step.text, passes[passIndex], state.revealed || 0);
     return {
       kind: "fade",
       previous: step.previous || "",
       words: view.shown,
-      pass: FADE_PASSES[passIndex],
+      pass: passes[passIndex],
       passIndex,
       line,
       lineCount: steps.length,
@@ -415,7 +452,7 @@ export function advanceFade(question, state = {}) {
     line = 0;
     pass += 1;
   }
-  if (pass >= FADE_PASSES.length) {
+  if (pass >= passesFor(question).length) {
     return { pass: frame.passIndex, line: frame.line, revealed: state.revealed || 0, finished: true };
   }
   return { pass, line, revealed: 0, finished: false };
@@ -692,9 +729,176 @@ function markSing(questions, rng, count, force) {
   return questions.map((question, index) => (picked.has(index) ? { ...question, sing: true } : question));
 }
 
+const ROUND_ROTATION = {
+  early: ["fade", "order", "fade", "think"],
+  middle: ["fade", "think", "order", "sing"],
+  late: ["sing", "think", "next", "order"]
+};
+
+function roundWindows(count) {
+  if (count <= 0) return [];
+  if (count === 1) return [1];
+  return lineWindowSizes(count);
+}
+
+function roundStage(index, count) {
+  if (count <= 1) return "middle";
+  if (index <= 0) return "early";
+  if (index >= count - 1) return "late";
+  return "middle";
+}
+
+function collectRounds(lines, sections) {
+  const specs = [];
+  for (const block of sectionBlocks(lines, sections)) {
+    let offset = 0;
+    for (const size of roundWindows(block.lines.length)) {
+      const start = block.start + offset;
+      const end = start + size;
+      specs.push({
+        start,
+        end,
+        label: block.label,
+        lines: lines.slice(start, end),
+        block
+      });
+      offset += size;
+    }
+  }
+  const seen = new Map();
+  return specs.map((spec, index) => {
+    const base = `mix-${contentKey(spec.lines)}`;
+    const count = (seen.get(base) || 0) + 1;
+    seen.set(base, count);
+    return {
+      ...spec,
+      id: count === 1 ? base : `${base}-${count}`,
+      stage: roundStage(index, specs.length)
+    };
+  });
+}
+
+export function roundList(lines, sections = []) {
+  return collectRounds(lines || [], sections).map((spec) => ({
+    id: spec.id,
+    start: spec.start,
+    end: spec.end,
+    label: spec.label,
+    stage: spec.stage,
+    lines: spec.lines
+  }));
+}
+
+function kindsForRound(stage, count) {
+  const pattern = ROUND_ROTATION[stage] || ROUND_ROTATION.middle;
+  const kinds = [];
+  for (let index = 0; index < count; index += 1) kinds.push(pattern[index % pattern.length]);
+  return kinds;
+}
+
+function makeMixedQuestion(kind, lines, sections, index, rng) {
+  const blocks = sectionBlocks(lines, sections);
+  const block = blocks.find((item) => index >= item.start && index < item.end) || {
+    label: "",
+    start: 0,
+    end: lines.length
+  };
+  let question = null;
+  if (kind === "fade" || kind === "think") question = makeStudyRound(kind, lines, block, index, index + 1);
+  else if (kind === "order") question = makeOrder(lines[index], index, rng);
+  else if (kind === "next" || kind === "sing") {
+    question = makeNext(lines, index, rng);
+    if (question && kind === "sing") question.sing = true;
+  }
+  if (!question) return null;
+  if (kind === "fade" || kind === "think") return question;
+  return withContext(question, lines, sections);
+}
+
+function makeWithFallback(kind, lines, sections, index, rng, previousKind, stage) {
+  const preferred = stage === "late"
+    ? ["think", "next", "sing", "order", "fade"]
+    : stage === "early"
+      ? ["fade", "order", "think", "next", "sing"]
+      : ["fade", "think", "order", "next", "sing"];
+  const order = [kind, ...preferred].filter((item, at, list) => list.indexOf(item) === at);
+  const tryKind = (candidate, allowRepeat) => {
+    if (!allowRepeat && candidate === previousKind && candidate !== kind) return null;
+    return makeMixedQuestion(candidate, lines, sections, index, rng);
+  };
+  for (const candidate of order) {
+    const made = tryKind(candidate, false);
+    if (made) return made;
+  }
+  for (const candidate of order) {
+    const made = tryKind(candidate, true);
+    if (made) return made;
+  }
+  return null;
+}
+
+function questionsForRound(lines, sections, spec, rng) {
+  const kinds = kindsForRound(spec.stage, spec.end - spec.start);
+  const made = [];
+  kinds.forEach((kind, offset) => {
+    const question = makeWithFallback(kind, lines, sections, spec.start + offset, rng, made.at(-1)?.kind, spec.stage);
+    if (question) made.push(question);
+  });
+  let fades = 0;
+  return made.map((question) => {
+    const { roundPrefix, ...rest } = question;
+    const next = {
+      ...rest,
+      roundId: spec.id,
+      roundLines: spec.lines.slice()
+    };
+    if (next.kind === "fade") {
+      next.passes = fades === 0 && spec.stage !== "late" ? ["full", "some", "half"] : ["full", "some"];
+      fades += 1;
+    }
+    return next;
+  });
+}
+
+export function describeMix(questions) {
+  const labels = [];
+  for (const question of questions || []) {
+    const label = question.sing
+      ? "Sing"
+      : { fade: "Fade", think: "Think", order: "Word order", next: "Next line" }[question.kind];
+    if (label && !labels.includes(label)) labels.push(label);
+  }
+  return labels.join(", ");
+}
+
+export function questionTaps(question) {
+  if (!question) return 0;
+  if (question.kind === "fade") {
+    const words = tokenize(question.steps?.[0]?.text || question.line || "").length;
+    return passesFor(question).reduce((sum, pass) => sum + 1 + hiddenWordIndexes(words, pass).length, 0);
+  }
+  if (question.kind === "think") return Math.max(1, question.steps?.length || 1) * 2;
+  if (question.kind === "order") return (question.tokens?.length || 0) + 1;
+  if (question.kind === "lines") return question.tokens?.length || 0;
+  return question.sing ? 2 : 1;
+}
+
+function buildMixedLesson(lines, sections, rng, options) {
+  const specs = collectRounds(lines, sections);
+  if (!specs.length) return [];
+  let spec = null;
+  if (options.roundId) spec = specs.find((item) => item.id === options.roundId) || null;
+  else {
+    const skip = new Set(options.skipIds || []);
+    spec = specs.find((item) => !skip.has(item.id)) || null;
+  }
+  return spec ? questionsForRound(lines, sections, spec, rng) : [];
+}
+
 export function buildLesson(lines, gameId, rng = Math.random, sections = [], options = {}) {
   const list = [...(lines || [])];
   const labels = sections || [];
+  if (gameId === "round") return buildMixedLesson(list, labels, rng, options);
   if (gameId === "fade" || gameId === "think") return keepRounds(studyLesson(list, labels, gameId), options);
   if (gameId === "lines") return keepRounds(lineLesson(list, labels, rng, Number.isInteger(options.chunk) ? options.chunk : null), options);
   if (gameId === "next") {
@@ -712,76 +916,59 @@ export function buildLesson(lines, gameId, rng = Math.random, sections = [], opt
 }
 
 export function chapterPlan(lines, sections = [], cleared = {}) {
-  const availability = gameAvailability(lines, sections);
+  const chapters = cleared?.chapters || (cleared?.rounds ? {} : (cleared || {}));
+  const roundState = cleared?.rounds || {};
+  const specs = collectRounds(lines || [], sections);
   let waiting = false;
-  return CHAPTERS.map((chapter) => {
-    const playable = Boolean(availability[chapter.id]);
-    const done = Boolean(cleared[chapter.id]);
+  const rounds = specs.map((spec) => {
+    const stat = roundState[spec.id] || {};
+    const finished = Boolean(stat.completed || stat.mastered);
     let status = "open";
-    if (!playable) status = "unavailable";
-    else if (waiting) status = "locked";
-    else if (done) status = "done";
-    if (playable && !done) waiting = true;
-    return { ...chapter, status, done: status === "done" };
+    if (waiting) status = "locked";
+    else if (finished) status = "done";
+    if (!finished) waiting = true;
+    const questions = questionsForRound(lines || [], sections, spec, () => 0.5);
+    return {
+      id: "round",
+      roundId: spec.id,
+      name: spec.label,
+      detail: `Lines ${spec.start + 1}–${spec.end} · ${describeMix(questions)}`,
+      stage: spec.stage,
+      status,
+      done: status === "done"
+    };
   });
+  const concert = CHAPTERS.find((chapter) => chapter.id === "concert");
+  let concertStatus = "open";
+  if (!specs.length || !gameAvailability(lines, sections).concert) concertStatus = "unavailable";
+  else if (waiting) concertStatus = "locked";
+  else if (chapters.concert) concertStatus = "done";
+  rounds.push({
+    ...concert,
+    status: concertStatus,
+    done: concertStatus === "done"
+  });
+  return rounds;
 }
 
-function unfinished(questions, rounds) {
-  return questions.find((question) => question.roundId && !rounds[question.roundId]?.mastered);
-}
-
-export function nextPractice(lines, sections = [], { rounds = {}, chapters = {} } = {}) {
-  const fade = studyLesson(lines, sections, "fade");
-  const think = studyLesson(lines, sections, "think");
-  const build = lineLesson(lines, sections, () => 0.5, null);
-  const recall = nextLesson(lines, sections, () => 0.5);
-  const plan = chapterPlan(lines, sections, {
-    ...chapters,
-    fade: chapters.fade || !unfinished(fade, rounds),
-    think: chapters.think || !unfinished(think, rounds),
-    lines: chapters.lines || !unfinished(build, rounds),
-    next: chapters.next || !unfinished(recall, rounds)
-  });
-  const playable = (id) => plan.find((chapter) => chapter.id === id)?.status === "open";
-  const openRound = (id, questions) => {
-    if (!playable(id)) return null;
-    const question = unfinished(questions, rounds);
-    return question ? { gameId: id, roundId: question.roundId } : null;
-  };
-  return openRound("fade", fade)
-    || openRound("think", think)
-    || openRound("lines", build)
-    || openRound("next", recall)
-    || { gameId: "concert" };
+export function nextPractice(lines, sections = [], { rounds = {} } = {}) {
+  const spec = collectRounds(lines || [], sections).find((item) => !rounds[item.id]?.mastered);
+  if (spec) return { gameId: "round", roundId: spec.id };
+  return { gameId: "concert" };
 }
 
 export function sectionProgress(lines, sections = [], rounds = {}) {
-  return sectionBlocks(lines, sections).map((block) => {
-    const questions = [];
-    if (block.lines.length >= 2) {
-      let offset = 0;
-      for (const size of lineWindowSizes(block.lines.length)) {
-        const start = block.start + offset;
-        const question = makeLineWindow(lines, { label: block.label }, start, start + size, () => 0.5);
-        if (question) questions.push(question);
-        offset += size;
-      }
-    }
-    const stamped = stampRounds(questions);
-    let mastered = 0;
-    for (const question of stamped) {
-      if (rounds[question.roundId]?.mastered) mastered += question.roundLines.length;
-    }
-    const again = stamped.find((question) => rounds[question.roundId]?.mastered);
+  return collectRounds(lines || [], sections).map((spec) => {
+    const mastered = rounds[spec.id]?.mastered ? spec.lines.length : 0;
     return {
-      id: block.id,
-      label: block.label,
-      opener: block.lines[0] || block.label,
-      start: block.start,
-      total: block.lines.length,
+      id: spec.id,
+      label: spec.label,
+      opener: spec.lines[0] || spec.label,
+      start: spec.start,
+      total: spec.lines.length,
       mastered,
-      roundId: (stamped.find((question) => !rounds[question.roundId]?.mastered) || again || {}).roundId || "",
-      done: block.lines.length > 0 && mastered >= block.lines.length
+      roundId: spec.id,
+      done: spec.lines.length > 0 && mastered >= spec.lines.length
     };
   });
 }

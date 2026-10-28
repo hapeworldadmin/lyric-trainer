@@ -313,7 +313,7 @@ test("webkit word order accepts number keys and Enter, and ignores keys in a fie
   }
 });
 
-test("webkit first chapter is fade, and line order is still not section order, on iPhone and Mac", async (t) => {
+test("webkit first round mixes a short fade, and line order is still not section order, on iPhone and Mac", async (t) => {
   if (!webkit) {
     t.skip("playwright is not installed");
     return;
@@ -362,16 +362,17 @@ test("webkit first chapter is fade, and line order is still not section order, o
       const page = await context.newPage();
       const base = `http://127.0.0.1:${flowPort}`;
       await page.goto(`${base}/#/song/sample-banana-flashlight`, { waitUntil: "domcontentloaded" });
-      await page.getByTestId("game-fade").waitFor();
+      await page.getByTestId("game-round").first().waitFor();
       const songText = await page.locator("body").innerText();
       assert.equal(songText.includes("Flow"), false);
       assert.equal(songText.includes("Tap the opening lines"), false);
-      assert.match(await page.getByTestId("chapter-progress").innerText(), /0 of 5 chapters/);
-      assert.match(await page.getByTestId("game-fade").innerText(), /Fade/);
-      assert.match(await page.getByTestId("game-lines").innerText(), /Build/);
-      assert.match(await page.getByTestId("game-lines").innerText(), /Locked/);
-      assert.equal(await page.getByTestId("game-lines").isDisabled(), true);
-      assert.equal(songText.match(/Finish the previous chapter/g)?.length || 0, 1);
+      assert.equal(songText.includes("Tricky lines"), false);
+      assert.match(await page.getByTestId("chapter-progress").innerText(), /0 of 4 rounds/);
+      assert.match(await page.getByTestId("game-round").first().innerText(), /Fade/);
+      assert.match(await page.getByTestId("game-round").nth(1).innerText(), /Locked/);
+      assert.equal(await page.getByTestId("game-round").nth(1).isDisabled(), true);
+      assert.equal(await page.getByTestId("game-concert").isDisabled(), true);
+      assert.equal(songText.match(/Finish the previous round/g)?.length || 0, 1);
       assert.equal(await page.getByTestId("nav-home").evaluate((el) => el.classList.contains("is-on")), false);
       const tabBar = await page.locator(".tabbar").evaluate((el) => getComputedStyle(el).backgroundColor);
       assert.equal(tabBar, "rgba(11, 11, 15, 0.72)");
@@ -390,7 +391,7 @@ test("webkit first chapter is fade, and line order is still not section order, o
       });
       assert.match(tapped, /is-accept|is-reject/);
 
-      await page.goto(`${base}/#/play/sample-banana-flashlight/fade`, { waitUntil: "domcontentloaded" });
+      await page.goto(`${base}/#/play/sample-banana-flashlight/round`, { waitUntil: "domcontentloaded" });
       await page.getByTestId("fade-advance").waitFor();
       assert.equal(await page.locator(".btn-primary").count(), 1);
       assert.equal(await page.getByTestId("hearts").count(), 0);
@@ -401,18 +402,15 @@ test("webkit first chapter is fade, and line order is still not section order, o
       assert.equal(fadeBg, "rgb(11, 11, 15)");
       assert.equal(fadeBtn, "rgb(139, 111, 255)");
       let fadeText = await page.locator("body").innerText();
+      assert.match(await page.getByTestId("play-crumb").innerText(), /Fade/);
       assert.equal(fadeText.includes(SAMPLE_SONG.lines[1]), false);
       assert.equal(fadeText.includes(SAMPLE_SONG.lines[0]), true);
       await page.keyboard.press("Enter");
       await page.getByTestId("fade-line").waitFor();
       fadeText = await page.locator("body").innerText();
-      assert.equal(fadeText.includes(SAMPLE_SONG.lines[1]), true);
-      assert.equal(fadeText.includes(SAMPLE_SONG.lines[2]), false);
-      let hops = 0;
-      while (hops < 12 && !(await page.getByTestId("fade-pass").innerText()).includes("Some words hidden")) {
-        await page.keyboard.press("Enter");
-        hops += 1;
-      }
+      assert.equal(fadeText.includes(SAMPLE_SONG.lines[1]), false);
+      assert.match(await page.getByTestId("fade-line").innerText(), /found/);
+      assert.equal(fadeText.includes(SAMPLE_SONG.lines[0]), false);
       assert.match(await page.getByTestId("fade-pass").innerText(), /Some words hidden/);
       assert.match(await page.getByTestId("fade-advance").innerText(), /Reveal next word/);
       assert.match(await page.getByTestId("question").innerText(), /say the missing words/i);
@@ -422,6 +420,16 @@ test("webkit first chapter is fade, and line order is still not section order, o
       assert.ok(hiddenBefore > 0);
       await page.keyboard.press("1");
       assert.ok(await page.getByTestId("fade-blank").count() < hiddenBefore);
+      let hops = 0;
+      while (hops < 24) {
+        const ask = await page.locator("body").innerText();
+        if (/put the words in order/i.test(ask)) break;
+        await page.keyboard.press("Enter");
+        hops += 1;
+      }
+      assert.match(await page.locator("body").innerText(), /put the words in order/i);
+      assert.equal((await page.locator("body").innerText()).includes(SAMPLE_SONG.lines[2]), false);
+      assert.equal(await page.locator(".btn-primary").count(), 1);
 
       await page.goto(`${base}/#/play/sample-banana-flashlight/think`, { waitUntil: "domcontentloaded" });
       await page.getByTestId("think-show").waitFor();

@@ -1,4 +1,4 @@
-import { songStats } from "./progress.js?v=10";
+import { songStats } from "./progress.js?v=11";
 import { clip, normalizeAnswer, safeConcertId, slug, songKey, songsMatch } from "./text.js?v=9";
 
 export function normalizeConcerts(data) {

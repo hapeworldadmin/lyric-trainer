@@ -2,7 +2,7 @@ import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js?v=10";
 
 export const MASTER_CORRECT = 2;
 export const ROUND_MISTAKE_LIMIT = 1;
-const GAMES = new Set(["fill", "order", "next", "letters", "concert", "lines", "fade", "think"]);
+const GAMES = new Set(["fill", "order", "next", "letters", "concert", "lines", "fade", "think", "round"]);
 const CHAPTER_IDS = ["fade", "think", "lines", "next", "concert"];
 
 export function emptyProgress() {

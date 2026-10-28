@@ -1,6 +1,6 @@
 import { blip } from "./audio.js?v=9";
 import { readClipboardFromGesture } from "./clipboard.js?v=9";
-import { activeConcertSummary, concertStatusLine, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=10";
+import { activeConcertSummary, concertStatusLine, concertsForSong, leaderboardFromSongScores, normalizeConcerts } from "./concerts.js?v=11";
 import {
   GAMES,
   advanceFade,
@@ -24,7 +24,7 @@ import {
   seededRng,
   singingMatch,
   studyFrame
-} from "./games.js?v=13";
+} from "./games.js?v=14";
 import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=9";
 import {
   addBonusXp,
@@ -40,9 +40,9 @@ import {
   resetLineMasteryIfChanged,
   retitleSongProgress,
   songStats
-} from "./progress.js?v=10";
+} from "./progress.js?v=11";
 import { SAMPLE_SONG } from "./sample.js?v=9";
-import { createScoreProvider, sanitizeRun } from "./scores.js?v=10";
+import { createScoreProvider, sanitizeRun } from "./scores.js?v=11";
 import { drawShareCard, shareText } from "./share.js?v=9";
 import {
   activePlayer,
@@ -52,7 +52,7 @@ import {
   sampleRecord,
   saveState,
   seedSample
-} from "./storage.js?v=10";
+} from "./storage.js?v=11";
 import { createLineRecognizer, speechRecognitionSupported } from "./speech.js?v=11";
 import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=11";
 import { interpretHearing } from "./voice.js?v=11";
@@ -524,17 +524,11 @@ function viewSong() {
   if (!song) return missing("That song is not on this device.", "#/");
   const progress = progressOf(session.state);
   const stats = songStats(progress, song);
-  const availability = gameAvailability(song.lines, song.sections || []);
-  const plan = chapterPlan(song.lines, song.sections || [], stats.chapters || {});
-  const playable = plan.filter((chapter) => chapter.status !== "unavailable");
-  const doneCount = playable.filter((chapter) => chapter.status === "done").length;
-  const reasons = {
-    fill: "Needs a line with a word to hide",
-    order: "Needs a line with at least 3 words",
-    letters: "Needs a line to hint"
-  };
+  const plan = chapterPlan(song.lines, song.sections || [], { chapters: stats.chapters || {}, rounds: stats.rounds || {} });
+  const rounds = plan.filter((chapter) => chapter.id === "round");
+  const doneCount = rounds.filter((chapter) => chapter.status === "done").length;
   const chapters = plan.map((chapter, index) => {
-    const testid = `data-testid="game-${chapter.id}"`;
+    const testid = chapter.id === "concert" ? `data-testid="game-concert"` : `data-testid="game-round"`;
     if (chapter.status === "unavailable") {
       return `<button class="game" type="button" disabled ${testid}><span>${index + 1} ${escapeHtml(chapter.name)}<small>Not enough lines</small></span></button>`;
     }
@@ -542,18 +536,12 @@ function viewSong() {
       return `<button class="game is-locked" type="button" disabled ${testid}><span class="game-name">${index + 1} ${escapeHtml(chapter.name)}</span><span class="lock-mark">${icon("lock")} Locked</span></button>`;
     }
     const mark = chapter.status === "done" ? "Done" : "Open";
+    const href = chapter.id === "concert"
+      ? `#/play/${encodeURIComponent(song.id)}/concert`
+      : `#/play/${encodeURIComponent(song.id)}/round?round=${encodeURIComponent(chapter.roundId)}`;
     return `
-      <a class="game${chapter.id === "concert" ? " is-final" : ""}" ${testid} href="#/play/${encodeURIComponent(song.id)}/${chapter.id}">
+      <a class="game${chapter.id === "concert" ? " is-final" : ""}" ${testid} href="${href}">
         <span>${index + 1} ${escapeHtml(chapter.name)}<small>${escapeHtml(chapter.detail)} · ${mark}</small></span>
-      </a>`;
-  }).join("");
-  const warm = GAMES.filter((game) => game.group === "warm").map((game) => {
-    if (!availability[game.id]) {
-      return `<button class="game" type="button" disabled><span>${escapeHtml(game.name)}<small>${reasons[game.id]}</small></span></button>`;
-    }
-    return `
-      <a class="game" data-testid="game-${game.id}" href="#/play/${encodeURIComponent(song.id)}/${game.id}">
-        <span>${escapeHtml(game.name)}<small>${escapeHtml(game.detail)}</small></span>
       </a>`;
   }).join("");
   const concerts = concertsForSong(session.concerts, song.title, song.artist);
@@ -561,7 +549,7 @@ function viewSong() {
   const links = concerts.map((item) => `<a class="text-link" href="#/concert/${encodeURIComponent(item.id)}">${escapeHtml(item.name)}</a>`).join("");
   const progressLine = stats.songMastered
     ? "Song mastered"
-    : `${doneCount} of ${playable.length} chapters`;
+    : `${doneCount} of ${rounds.length} rounds`;
   return `
     <section class="screen">
       <header class="hero hero-song" style="${accentStyle(concert)}">
@@ -575,11 +563,9 @@ function viewSong() {
         ${meter(stats.masteryPercent)}
       </div>
       ${links ? `<p class="sub">On the setlist: ${links}</p>` : ""}
-      <p class="kicker">Chapters</p>
+      <p class="kicker">Rounds</p>
       <div class="game-list">${chapters}</div>
-      ${plan.some((chapter) => chapter.status === "locked") ? `<p class="chapter-note" data-testid="chapter-lock-note">Finish the previous chapter</p>` : ""}
-      <p class="kicker">Tricky lines</p>
-      <div class="game-list">${warm}</div>
+      ${plan.some((chapter) => chapter.status === "locked") ? `<p class="chapter-note" data-testid="chapter-lock-note">Finish the previous round</p>` : ""}
       <div class="dock">
         <a class="btn btn-text" href="#/edit/${encodeURIComponent(song.id)}">Edit lyrics</a>
         <button class="btn btn-text btn-danger" type="button" data-action="ask-delete" data-id="${escapeHtml(song.id)}">Delete song</button>
@@ -594,7 +580,7 @@ function viewPlay() {
   ensureStudy();
   const question = play.questions[play.index];
   const meterNow = lessonMeter(play, question);
-  const showHearts = play.gameId !== "fade" && play.gameId !== "think";
+  const showHearts = question?.kind !== "fade" && question?.kind !== "think";
   const hearts = showHearts ? Array.from({ length: play.maxHearts }, (_, index) => `
     <span class="heart ${index < play.hearts ? "" : "is-empty"}">${icon("heart")}</span>
   `).join("") : "";
@@ -648,6 +634,19 @@ function formatSeconds(seconds) {
   return Number.isInteger(seconds) ? `${seconds}s` : `${seconds.toFixed(1)}s`;
 }
 
+function activityName(question) {
+  if (question?.sing) return "Sing";
+  return {
+    fade: "Fade",
+    think: "Think",
+    order: "Word order",
+    next: "Next line",
+    lines: "Line order",
+    fill: "Fill the blank",
+    letters: "First letters"
+  }[question?.kind] || "";
+}
+
 function playCrumb(play, question) {
   const context = question?.context || {};
   let position = context.position || 0;
@@ -661,7 +660,8 @@ function playCrumb(play, question) {
   if (context.section && position) place = `${context.section}, line ${position}`;
   else if (!study && context.rangeLabel) place = context.rangeLabel;
   else if (position) place = `line ${position}`;
-  return place ? `${play.gameName} · ${place}` : play.gameName;
+  const head = play.gameId === "round" && activityName(question) ? activityName(question) : play.gameName;
+  return place ? `${head} · ${place}` : head;
 }
 
 function qLabel(text, testid = "") {
@@ -679,7 +679,7 @@ function contextHtml(question) {
   const context = question?.context;
   if (!context || question?.kind === "fade" || question?.kind === "think") return { before: "", after: "" };
   const showPrevious = context.previous && question.kind !== "next" && !question.hidesPrevious && !question.sing;
-  let previous = showPrevious ? `${qLabel("Previous line")}${lyricBlock(context.previous, "context-previous")}` : "";
+  let previous = showPrevious ? `${qLabel("Previous line")}${lyricBlock(context.previous, "context-previous", "is-context")}` : "";
   if (question.sing && question.prompt) {
     previous = `${qLabel("Previous line")}${lyricBlock(question.prompt, "context-previous")}`;
   }
@@ -893,7 +893,7 @@ function viewResults() {
         ${section.done ? `<button class="btn btn-text" type="button" data-action="practice-again" data-round="${escapeHtml(section.roundId)}">Practice again</button>` : ""}
       `).join("")}
     </div>` : "";
-  const finalLocked = song ? chapterPlan(song.lines, song.sections || [], stats?.chapters || {}).find((item) => item.id === "concert")?.status === "locked" : false;
+  const finalLocked = song ? chapterPlan(song.lines, song.sections || [], { chapters: stats?.chapters || {}, rounds: stats?.rounds || {} }).find((item) => item.id === "concert")?.status === "locked" : false;
   const bits = [];
   if (results.xp > 0) bits.push(`${results.xp} XP`);
   if (results.accuracy > 0) bits.push(`${results.accuracy}% accuracy`);
@@ -1462,6 +1462,7 @@ function ensurePlay() {
     study: null,
     order: null,
     questionMistakes: 0,
+    roundMistakes: 0,
     deadline: null,
     finishing: false
   };
@@ -1774,7 +1775,18 @@ function submitCurrent(forced = null) {
     ? Math.max(0, (play.deadline - performance.now()) / 1000)
     : null;
   const progress = progressOf(session.state);
-  if (question.roundId) {
+  if (question.roundId && play.gameId === "round") {
+    const added = forced?.study ? (forced.studyMistakes || 0) : (play.questionMistakes || 0);
+    play.roundMistakes = (play.roundMistakes || 0) + added;
+    const last = play.questions.filter((item) => item.roundId === question.roundId).at(-1) === question;
+    if (last) {
+      recordRoundResult(progress, song, {
+        roundId: question.roundId,
+        mistakes: play.roundMistakes,
+        completed: true
+      });
+    }
+  } else if (question.roundId) {
     recordRoundResult(progress, song, {
       roundId: question.roundId,
       mistakes: forced?.study ? (forced.studyMistakes || 0) : play.questionMistakes,
@@ -2372,7 +2384,7 @@ function onClick(event) {
     const songId = session.results?.songId;
     const round = el.dataset.round || "";
     const again = action === "practice-again" ? "&again=1" : "";
-    if (songId && round) go(`#/play/${encodeURIComponent(songId)}/lines?round=${encodeURIComponent(round)}${again}`);
+    if (songId && round) go(`#/play/${encodeURIComponent(songId)}/round?round=${encodeURIComponent(round)}${again}`);
   } else if (action === "continue") continueLesson();
   else if (action === "confirm-modal") {
     const confirm = session.modal?.onConfirm;

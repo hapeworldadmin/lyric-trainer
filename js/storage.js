@@ -1,6 +1,6 @@
 import { SAMPLE_SONG } from "./sample.js?v=9";
-import { emptyProgress } from "./progress.js?v=10";
-import { sanitizeRun } from "./scores.js?v=10";
+import { emptyProgress } from "./progress.js?v=11";
+import { sanitizeRun } from "./scores.js?v=11";
 import { clip, songKey, uid } from "./text.js?v=9";
 
 export const STORAGE_KEY = "lyric-trainer-v1";

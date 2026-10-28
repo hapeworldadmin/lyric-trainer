@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import {
+  advanceFade,
   answersMatch,
   buildLesson,
   chapterPlan,
@@ -10,6 +11,7 @@ import {
   firstLessonId,
   gameAvailability,
   gradeAnswer,
+  initialThink,
   isOrderCorrect,
   judgeOrderTap,
   lessonBonus,
@@ -18,11 +20,14 @@ import {
   mixTypes,
   nextPractice,
   pointsFor,
+  questionTaps,
   secondsForLine,
   sectionBlocks,
   sectionProgress,
+  roundList,
   seededRng,
-  singingMatch
+  singingMatch,
+  studyFrame
 } from "../js/games.js";
 import { SAMPLE_SONG } from "../js/sample.js";
 
@@ -34,7 +39,7 @@ test("every game can be built from the sample song", () => {
   assert.equal(availability.letters, true);
   assert.equal(availability.concert, true);
   assert.equal(availability.lines, true);
-  assert.equal(firstLessonId(SAMPLE_SONG.lines, SAMPLE_SONG.sections), "fade");
+  assert.equal(firstLessonId(SAMPLE_SONG.lines, SAMPLE_SONG.sections), "round");
   assert.equal(availability.fade, true);
   assert.equal(availability.think, true);
   assert.equal(Object.hasOwn(availability, "sections"), false);
@@ -155,7 +160,7 @@ test("line order slides in short windows", () => {
   const lineLesson = buildLesson(lines, "lines", seededRng(1), flat);
   assert.ok(lineLesson.length > 1);
   const windows = lineLesson.filter((question) => question.kind === "lines");
-  assert.ok(windows.every((question) => question.tokens.length >= 2 && question.tokens.length <= 6));
+  assert.ok(windows.every((question) => question.tokens.length >= 2 && question.tokens.length <= 4));
   assert.equal(windows.reduce((sum, question) => sum + question.tokens.length, 0), 33);
   assert.equal(windows[0].context.previous, "");
   assert.equal(windows[1].context.previous, windows[0].tokens.at(-1).text);
@@ -164,8 +169,7 @@ test("line order slides in short windows", () => {
   assert.deepEqual(covered, lines);
 
   const longSection = buildLesson(lines, "lines", seededRng(2), lines.map(() => "Chorus")).filter((question) => question.kind === "lines");
-  assert.ok(longSection.every((question) => question.tokens.length <= 6));
-  assert.equal(longSection[0].tokens.length, 6);
+  assert.ok(longSection.every((question) => question.tokens.length >= 3 && question.tokens.length <= 4));
   assert.equal(longSection.reduce((sum, question) => sum + question.tokens.length, 0), 33);
 });
 
@@ -266,12 +270,14 @@ test("question types do not repeat more than twice in a row", () => {
   }
 });
 
-test("line rounds stay at least three lines and a seven line stanza is four then three", () => {
+test("line rounds are three or four lines and a seven line stanza is four then three", () => {
   assert.deepEqual(lineWindowSizes(7), [4, 3]);
   assert.deepEqual(lineWindowSizes(2), [2]);
-  assert.deepEqual(lineWindowSizes(6), [6]);
-  assert.deepEqual(lineWindowSizes(10), [5, 5]);
-  assert.deepEqual(lineWindowSizes(12), [6, 6]);
+  assert.deepEqual(lineWindowSizes(5), [3, 2]);
+  assert.deepEqual(lineWindowSizes(6), [3, 3]);
+  assert.deepEqual(lineWindowSizes(9), [3, 3, 3]);
+  assert.deepEqual(lineWindowSizes(10), [4, 3, 3]);
+  assert.deepEqual(lineWindowSizes(12), [4, 4, 4]);
   const seven = Array.from({ length: 7 }, (_, index) => `lantern line number ${index} here`);
   const lesson = buildLesson(seven, "lines", seededRng(1), seven.map(() => "Verse")).filter((question) => question.kind === "lines");
   assert.deepEqual(lesson.map((question) => question.tokens.length), [4, 3]);
@@ -291,26 +297,28 @@ test("mastered rounds are skipped and the final run still covers them", () => {
   let cursor = 0;
   for (const question of concert) cursor += question.span || 1;
   assert.equal(cursor, lines.length);
-  const rounds = { [full[0].roundId]: { mastered: true } };
+  const listed = roundList(lines, sections);
+  const rounds = { [listed[0].id]: { mastered: true, completed: true } };
   const step = nextPractice(lines, sections, { rounds, chapters: { sections: true } });
-  assert.equal(step.gameId, "fade");
-  assert.notEqual(step.roundId, full[0].roundId);
+  assert.equal(step.gameId, "round");
+  assert.equal(step.roundId, listed[1].id);
   const progress = sectionProgress(lines, sections, rounds);
-  assert.equal(progress[0].mastered, full[0].tokens.length);
+  assert.equal(progress[0].mastered, listed[0].lines.length);
+  assert.equal(progress[0].done, true);
   const plan = chapterPlan(lines, sections, {});
-  assert.deepEqual(plan.map((chapter) => chapter.id), ["fade", "think", "lines", "next", "concert"]);
-  assert.equal(plan[0].name, "Fade");
+  assert.deepEqual(plan.map((chapter) => chapter.id), ["round", "round", "concert"]);
+  assert.equal(plan[0].name, "Verse");
   assert.equal(plan[0].status, "open");
   assert.equal(plan[1].status, "locked");
-  assert.equal(plan[4].id, "concert");
-  assert.equal(plan[4].status, "locked");
-  assert.equal(chapterPlan(lines, sections, { fade: true })[1].status, "open");
-  assert.equal(chapterPlan(lines, sections, { fade: true })[1].id, "think");
-  assert.equal(chapterPlan(lines, sections, { sections: true })[0].status, "open");
-  assert.equal(chapterPlan(lines, sections, { sections: true })[0].id, "fade");
+  assert.equal(plan[2].id, "concert");
+  assert.equal(plan[2].status, "locked");
+  const played = chapterPlan(lines, sections, { rounds: { [listed[0].id]: { completed: true } } });
+  assert.equal(played[0].status, "done");
+  assert.equal(played[1].status, "open");
+  assert.equal(played[2].status, "locked");
   const fresh = nextPractice(lines, sections, {});
-  assert.equal(fresh.gameId, "fade");
-  assert.ok(fresh.roundId);
+  assert.equal(fresh.gameId, "round");
+  assert.equal(fresh.roundId, listed[0].id);
   for (const gameId of ["lines", "next", "concert"]) {
     const lesson = buildLesson(lines, gameId, seededRng(5), sections);
     assert.ok(lesson.length > 0, gameId);
@@ -319,7 +327,7 @@ test("mastered rounds are skipped and the final run still covers them", () => {
   const singles = ["alpha one two", "beta three four", "gamma five six"];
   const singleLabels = ["Verse", "Chorus", "Bridge"];
   assert.equal(gameAvailability(singles, singleLabels).lines, false);
-  assert.equal(firstLessonId(singles, singleLabels), "fade");
+  assert.equal(firstLessonId(singles, singleLabels), "round");
   assert.ok(buildLesson(singles, "next", seededRng(1), singleLabels).length > 0);
   const covered = buildLesson(singles, "concert", seededRng(1), singleLabels);
   assert.equal(covered.some((question) => question.kind === "sections"), false);
@@ -384,4 +392,76 @@ test("about one in three next-line questions can be sung, and the final run has 
     const lesson = buildLesson(SAMPLE_SONG.lines, gameId, seededRng(4), SAMPLE_SONG.sections);
     assert.equal(lesson.some((question) => question.sing), false);
   }
+});
+
+test("a round mixes types, stays short, and leans toward recall later", () => {
+  const lines = SAMPLE_SONG.lines;
+  const sections = SAMPLE_SONG.sections;
+  const specs = roundList(lines, sections);
+  assert.deepEqual(specs.map((spec) => spec.lines.length), [4, 4, 2, 2]);
+  assert.deepEqual(specs.map((spec) => spec.stage), ["early", "middle", "middle", "late"]);
+  const ease = { fade: 0, order: 0, think: 1, next: 1 };
+  const scores = [];
+  for (const spec of specs) {
+    const lesson = buildLesson(lines, "round", seededRng(3), sections, { roundId: spec.id });
+    assert.ok(lesson.length >= 2 && lesson.length <= 4, spec.stage);
+    assert.ok(lesson.every((question) => question.roundId === spec.id));
+    assert.ok(new Set(lesson.map((question) => question.sing ? "sing" : question.kind)).size >= 2, spec.stage);
+    let taps = 0;
+    for (const question of lesson) {
+      taps += questionTaps(question);
+      assert.equal(question.context?.next || "", "");
+      const visible = exposedText(question);
+      for (const later of lines.slice(question.lineIndex + (question.span || 1))) {
+        assert.equal(visible.includes(later), false, `${question.kind} shows a later line`);
+      }
+      if (question.kind === "fade") {
+        assert.ok(question.passes.length >= 2 && question.passes.length <= 3);
+        assert.equal(question.steps.length, 1);
+        let state = { pass: 0, line: 0, revealed: 0 };
+        let guard = 0;
+        while (!state.finished && guard < 40) {
+          guard += 1;
+          const frame = studyFrame(question, state);
+          assert.equal(frame.future.length, 0);
+          assert.equal((frame.previous && lines.includes(frame.previous)) || !frame.previous, true);
+          for (const later of lines.slice(question.lineIndex + 1)) {
+            assert.equal((frame.words || []).filter(Boolean).join(" ").includes(later), false);
+          }
+          const next = advanceFade(question, state);
+          state = next.finished ? { ...state, finished: true } : next;
+        }
+        assert.equal(state.finished, true);
+      }
+      if (question.kind === "think") {
+        const frame = studyFrame(question, initialThink(question));
+        assert.equal(frame.target, "");
+        assert.equal(frame.future.length, 0);
+      }
+      if (question.sing) {
+        assert.equal(question.choices.includes(question.answer), true);
+        assert.equal(visible.split("\n").includes(question.answer), false);
+      }
+    }
+    assert.ok(taps <= 28, `${spec.stage} takes ${taps} taps`);
+    const recalled = lesson.filter((question) => question.sing || ease[question.kind] === 1).length;
+    scores.push(recalled / lesson.length);
+  }
+  assert.ok(scores[0] < scores[scores.length - 1]);
+  assert.deepEqual(
+    buildLesson(lines, "round", seededRng(1), sections).map((question) => question.sing ? "sing" : question.kind),
+    ["fade", "order", "fade", "think"]
+  );
+  assert.deepEqual(
+    buildLesson(lines, "round", seededRng(1), sections, { roundId: specs[1].id }).map((question) => question.sing ? "sing" : question.kind),
+    ["fade", "think", "order", "sing"]
+  );
+  const skipped = buildLesson(lines, "round", seededRng(1), sections, { skipIds: [specs[0].id] });
+  assert.equal(skipped[0].roundId, specs[1].id);
+  assert.equal(buildLesson(lines, "round", seededRng(1), sections, { skipIds: specs.map((spec) => spec.id) }).length, 0);
+  const mastered = {};
+  for (const spec of specs) mastered[spec.id] = { mastered: true };
+  assert.equal(nextPractice(lines, sections, { rounds: mastered }).gameId, "concert");
+  const open = chapterPlan(lines, sections, { chapters: {}, rounds: mastered });
+  assert.equal(open.find((item) => item.id === "concert").status, "open");
 });
