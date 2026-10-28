@@ -371,7 +371,8 @@ test("webkit first round mixes a short fade, and line order is still not section
       assert.match(await page.getByTestId("game-round").first().innerText(), /Fade/);
       assert.match(await page.getByTestId("game-round").nth(1).innerText(), /Locked/);
       assert.equal(await page.getByTestId("game-round").nth(1).isDisabled(), true);
-      assert.equal(await page.getByTestId("game-concert").isDisabled(), true);
+      assert.equal(await page.getByTestId("game-concert").isDisabled(), false);
+      assert.match(await page.getByTestId("game-concert").getAttribute("href"), /\/concert$/);
       assert.equal(songText.match(/Finish the previous round/g)?.length || 0, 1);
       assert.equal(await page.getByTestId("nav-home").evaluate((el) => el.classList.contains("is-on")), false);
       const tabBar = await page.locator(".tabbar").evaluate((el) => getComputedStyle(el).backgroundColor);

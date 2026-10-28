@@ -1,5 +1,5 @@
 import { SAMPLE_SONG } from "./sample.js?v=9";
-import { emptyProgress } from "./progress.js?v=11";
+import { emptyProgress } from "./progress.js?v=12";
 import { sanitizeRun } from "./scores.js?v=11";
 import { clip, songKey, uid } from "./text.js?v=9";
 

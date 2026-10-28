@@ -194,7 +194,7 @@ test("mastered fade rounds are skipped and the final run still covers them", () 
   assert.equal(concert.reduce((sum, question) => sum + (question.span || 1), 0), LINES.length);
   const plan = chapterPlan(LINES, SECTIONS, {});
   assert.equal(plan.at(-1).id, "concert");
-  assert.equal(plan.at(-1).status, "locked");
+  assert.equal(plan.at(-1).status, "open");
   assert.equal(plan[0].id, "round");
   assert.equal(plan[0].status, "open");
 });
