@@ -9,6 +9,7 @@ import {
   buildLesson,
   chapterPlan,
   correctLine,
+  fadeLessonFraction,
   fadePassLabel,
   firstLessonId,
   gameAvailability,
@@ -23,7 +24,7 @@ import {
   seededRng,
   singingMatch,
   studyFrame
-} from "./games.js?v=13";
+} from "./games.js?v=14";
 import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=9";
 import {
   addBonusXp,
@@ -87,7 +88,8 @@ const ICONS = {
   user: '<path fill="currentColor" d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4 0-7 2-7 4.5V21h14v-2.5C19 16 16 14 12 14z"/>',
   back: '<path fill="currentColor" d="M14.5 5 7.5 12l7 7 1.4-1.4L10.3 12l5.6-5.6z"/>',
   close: '<path fill="currentColor" d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z"/>',
-  mic: '<path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-4 4.9V19h3v2H8v-2h3v-2.1A5 5 0 0 1 7 12H5a7 7 0 0 0 6 6.7V21h2v-2.3A7 7 0 0 0 19 12h-2z"/>'
+  mic: '<path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-4 4.9V19h3v2H8v-2h3v-2.1A5 5 0 0 1 7 12H5a7 7 0 0 0 6 6.7V21h2v-2.3A7 7 0 0 0 19 12h-2z"/>',
+  lock: '<path fill="currentColor" d="M8 10V8a4 4 0 0 1 8 0v2h1a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h1zm2 0h4V8a2 2 0 0 0-4 0v2z"/>'
 };
 
 function icon(name) {
@@ -317,7 +319,8 @@ function tabOn(id) {
   const name = session.route.name;
   const section = navSection();
   if (id === "home") {
-    if (["song", "add", "edit", "play", "results"].includes(name)) return section === "home";
+    if (name === "song") return false;
+    if (["add", "edit", "play", "results"].includes(name)) return section === "home";
     return name === "home";
   }
   if (id === "concerts") {
@@ -530,7 +533,7 @@ function viewSong() {
       return `<button class="game" type="button" disabled ${testid}><span>${index + 1} ${escapeHtml(chapter.name)}<small>Not enough lines</small></span></button>`;
     }
     if (chapter.status === "locked") {
-      return `<button class="game" type="button" disabled ${testid}><span>${index + 1} ${escapeHtml(chapter.name)}<small>Finish the previous round</small></span></button>`;
+      return `<button class="game is-locked" type="button" disabled ${testid}><span class="game-name">${index + 1} ${escapeHtml(chapter.name)}</span><span class="lock-mark">${icon("lock")} Locked</span></button>`;
     }
     const mark = chapter.status === "done" ? "Done" : "Open";
     const href = chapter.id === "concert"
@@ -562,6 +565,7 @@ function viewSong() {
       ${links ? `<p class="sub">On the setlist: ${links}</p>` : ""}
       <p class="kicker">Rounds</p>
       <div class="game-list">${chapters}</div>
+      ${plan.some((chapter) => chapter.status === "locked") ? `<p class="chapter-note" data-testid="chapter-lock-note">Finish the previous round</p>` : ""}
       <div class="dock">
         <a class="btn btn-text" href="#/edit/${encodeURIComponent(song.id)}">Edit lyrics</a>
         <button class="btn btn-text btn-danger" type="button" data-action="ask-delete" data-id="${escapeHtml(song.id)}">Delete song</button>
@@ -575,12 +579,11 @@ function viewPlay() {
   if (!play) return `<section class="screen"><p>That lesson is over.</p></section>`;
   ensureStudy();
   const question = play.questions[play.index];
-  const total = play.questions.length;
-  const shown = play.feedback ? play.index + 1 : play.index;
-  const width = Math.round((shown / total) * 100);
-  const hearts = Array.from({ length: play.maxHearts }, (_, index) => `
+  const meterNow = lessonMeter(play, question);
+  const showHearts = question?.kind !== "fade" && question?.kind !== "think";
+  const hearts = showHearts ? Array.from({ length: play.maxHearts }, (_, index) => `
     <span class="heart ${index < play.hearts ? "" : "is-empty"}">${icon("heart")}</span>
-  `).join("");
+  `).join("") : "";
   const seconds = questionSeconds(question);
   const timer = play.gameId === "concert" && !play.feedback ? `
     <div class="timer" data-testid="timer">
@@ -599,12 +602,12 @@ function viewPlay() {
           <button class="icon-btn" type="button" data-action="leave" data-testid="leave-lesson" aria-label="Close lesson">${icon("close")}</button>
           <p class="play-crumb" data-testid="play-crumb">${escapeHtml(playCrumb(play, question))}</p>
           <div class="play-meta">
-            <span class="score-pill" data-testid="score-pill">${formatScore(play.score)}</span>
-            <div class="hearts" data-testid="hearts" aria-label="${play.hearts} hearts left">${hearts}</div>
+            <span class="score-pill" data-testid="score-pill" aria-label="Score ${formatScore(play.score)}">${formatScore(play.score)}</span>
+            ${showHearts ? `<div class="hearts" data-testid="hearts" aria-label="${play.hearts} of ${play.maxHearts} lives">${hearts}</div>` : ""}
           </div>
         </div>
-        <div class="lesson-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${shown}" data-testid="lesson-progress">
-          <span style="width:${width}%"></span>
+        <div class="lesson-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${meterNow.now}" aria-label="Lesson progress" data-testid="lesson-progress">
+          <span style="width:${meterNow.width}%"></span>
         </div>
         ${timer}
         <div class="play-body">
@@ -617,6 +620,14 @@ function viewPlay() {
       ${dock ? `<div class="answer-dock" data-testid="answer-dock">${dock}</div>` : ""}
     </section>
   `;
+}
+
+function lessonMeter(play, question) {
+  const total = Math.max(play.questions.length, 1);
+  let done = play.feedback ? play.index + 1 : play.index;
+  if (!play.feedback && question?.kind === "fade") done += fadeLessonFraction(question, play.study || {});
+  const width = Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+  return { width, now: width };
 }
 
 function formatSeconds(seconds) {
@@ -723,7 +734,8 @@ function studyHtml(question) {
     : "";
   if (frame.kind === "think") {
     const target = frame.target ? lyricBlock(frame.target, "think-line") : "";
-    return `${previous}${qLabel(frame.prompt, "question")}${target}`;
+    const place = frame.place ? `<p class="hint" data-testid="think-place">${escapeHtml(frame.place)}</p>` : "";
+    return `${previous}${qLabel(frame.prompt, "question")}${place}${target}`;
   }
   const words = frame.words.map((word) => (
     word
@@ -743,7 +755,7 @@ function orderTargetHtml(question) {
     if (!placed) return `<span class="target-blank"></span>`;
     return `<span class="target-word">${escapeHtml(placed)}</span>`;
   }).join(" ");
-  return `${qLabel("Put the words in order")}<div class="lyric-block"><p class="target-line" data-testid="question">${words}</p></div>`;
+  return `${qLabel("Put the words in order")}<div class="lyric-block"><p class="target-line" data-testid="question">${words}</p></div><p class="play-status" data-testid="order-status" role="status"></p>`;
 }
 
 function keyHint(index) {
@@ -762,18 +774,22 @@ function singAnswerParts() {
     <button class="mic-btn${listening ? " is-listening" : ""}" type="button" data-action="toggle-mic" data-testid="mic" aria-pressed="${listening ? "true" : "false"}" aria-label="${listening ? "Stop listening" : "Sing or speak"}">${icon("mic")}</button>` : "";
   const choices = voice ? `<button class="btn btn-ghost" type="button" data-action="cant-sing" data-testid="cant-sing">Show choices</button>` : "";
   const heard = wrong && play.miss.heard
-    ? `<p class="heard-note" data-testid="heard-note">Heard: ${escapeHtml(play.miss.heard)}</p>` : "";
-  const miss = wrong ? `<p class="sing-miss" data-testid="sing-miss">${escapeHtml(play.miss.message)}</p>${heard}` : "";
+    ? `<span class="heard-note" data-testid="heard-note">Heard: ${escapeHtml(play.miss.heard)}</span>` : "";
+  const missBody = [wrong ? escapeHtml(play.miss.message) : "", heard].filter(Boolean).join(" ");
+  const listenSlot = voice ? `
+        <div class="listen-slot" data-testid="listen-slot">
+          <p class="sing-status" data-testid="listen-status" ${listening ? "" : "hidden"}>Listening</p>
+          <p class="live-transcript" data-testid="live-transcript" ${listening && play?.voiceDisplay ? "" : "hidden"}>${transcript}</p>
+        </div>` : "";
   const reveal = (play?.questionMistakes || 0) >= 2
     ? `<button class="btn btn-ghost" type="button" data-action="show-answer" data-testid="show-answer">Show answer</button>` : "";
   return {
     tray: "",
     chips: `
       <form id="answer-form" class="sing-form" data-testid="sing-form">
-        <p class="sing-status" data-testid="listen-status" ${listening ? "" : "hidden"}>Listening</p>
-        ${miss}
+        ${listenSlot}
+        <p class="sing-miss" data-testid="sing-miss" role="status">${missBody}</p>
         <div class="sing-field${wrong ? " is-wrong" : ""}" id="sing-field" data-testid="sing-field">
-          <p class="live-transcript" data-testid="live-transcript" ${listening && play?.voiceDisplay ? "" : "hidden"}>${transcript}</p>
           <div class="sing-row">
             <input class="sing-input" id="answer-input" data-testid="sing-input" type="text" enterkeyhint="done" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Next line" value="${fieldValue}">
             ${mic}
@@ -808,9 +824,11 @@ function answerParts(question) {
     const pool = order.pool.map((id, index) => `
       <button class="token" type="button" data-action="pick-token" data-option="${index}" data-token="${escapeHtml(id)}">${keyHint(index)}${escapeHtml(byId.get(id)?.text || "")}</button>
     `).join("");
-    const empty = "Your line appears here";
+    const tray = question.kind === "lines" && placed
+      ? `<div class="built-lines" data-testid="built-lines">${placed}</div>`
+      : "";
     return {
-      tray: `<div class="tray${stacked}" data-testid="tray">${placed || `<span class="hint">${empty}</span>`}</div>`,
+      tray,
       chips: `<div class="pool${stacked}">${pool}</div>`
     };
   }
@@ -1602,6 +1620,8 @@ function judgeSing() {
   stopListening();
   const field = document.getElementById("sing-field");
   field?.classList.add(correct ? "is-accept" : "is-reject");
+  const status = document.querySelector("[data-testid=sing-miss]");
+  if (status) status.textContent = correct ? "" : "Not quite, try again";
   buzz(correct ? 12 : 20);
   blip(correct ? "ok" : "bad", session.state.settings.sound);
   if (!correct) {
@@ -2195,11 +2215,23 @@ function onSheetPaste(event) {
   applyPastedText(text);
 }
 
+let orderStatusTimer = 0;
+
+function showOrderStatus(message) {
+  const status = document.querySelector("[data-testid=order-status]");
+  if (!status) return;
+  status.textContent = message;
+  window.clearTimeout(orderStatusTimer);
+  orderStatusTimer = window.setTimeout(() => {
+    if (status.isConnected) status.textContent = "";
+  }, 1500);
+}
+
 function paintHearts() {
   const root = document.querySelector("[data-testid=hearts]");
   const play = session.play;
   if (!root || !play) return;
-  root.setAttribute("aria-label", `${play.hearts} hearts left`);
+  root.setAttribute("aria-label", `${play.hearts} of ${play.maxHearts} lives`);
   root.querySelectorAll(".heart").forEach((heart, index) => {
     heart.classList.toggle("is-empty", index >= play.hearts);
   });
@@ -2228,15 +2260,19 @@ function judgePickedToken(button) {
     play.hearts = Math.max(0, play.hearts - 1);
     paintHearts();
     button.classList.add("is-reject");
+    if (question.kind === "order") showOrderStatus("Not that word. Try another.");
     buzz(20);
     blip("bad", session.state.settings.sound);
     const failed = play.hearts <= 0;
     window.setTimeout(() => {
       if (session.play !== play) return;
-      play.orderBusy = false;
       button.classList.remove("is-reject");
-      if (failed) submitCurrent({ orderFailed: true });
     }, motionDelay());
+    window.setTimeout(() => {
+      if (session.play !== play) return;
+      play.orderBusy = false;
+      if (failed) submitCurrent({ orderFailed: true });
+    }, failed ? 1500 : motionDelay());
     return;
   }
   play.orderBusy = true;
@@ -2429,8 +2465,8 @@ function onInput(event) {
       if (session.play.miss) {
         session.play.miss = null;
         document.getElementById("sing-field")?.classList.remove("is-wrong");
-        document.querySelector("[data-testid=sing-miss]")?.remove();
-        document.querySelector("[data-testid=heard-note]")?.remove();
+        const status = document.querySelector("[data-testid=sing-miss]");
+        if (status) status.textContent = "";
       }
     }
     if (event.isTrusted && session.play?.listening) stopListening();

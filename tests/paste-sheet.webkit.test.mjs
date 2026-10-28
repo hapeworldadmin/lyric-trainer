@@ -229,7 +229,7 @@ test("webkit word order accepts number keys and Enter, and ignores keys in a fie
         line: read(".target-line"),
         blank: read(".target-blank"),
         token: read(".pool .token"),
-        tray: read("[data-testid=tray]"),
+        tray: document.querySelectorAll("[data-testid=tray]").length,
         crumb: read("[data-testid=play-crumb]"),
         heart: read(".heart"),
         hint: read(".key-hint"),
@@ -245,9 +245,9 @@ test("webkit word order accepts number keys and Enter, and ignores keys in a fie
     assert.equal(look.token.size, "17px");
     assert.equal(look.token.weight, "600");
     assert.equal(look.token.minHeight, "48px");
-    assert.equal(look.tray.minHeight, "56px");
-    assert.equal(look.tray.borderStyle, "dashed");
-    assert.equal(look.tray.border, "rgb(124, 92, 255)");
+    assert.equal(look.tray, 0);
+    assert.equal(await page.getByText("Your line appears here").count(), 0);
+    assert.equal(await page.getByTestId("order-status").getAttribute("role"), "status");
     assert.equal(look.crumb.size, "12px");
     assert.equal(look.crumb.weight, "600");
     assert.match(look.crumb.text, /Word order/);
@@ -272,6 +272,26 @@ test("webkit word order accepts number keys and Enter, and ignores keys in a fie
     });
     await page.waitForFunction(() => !document.getElementById("netlify-drawer"));
 
+    const miss = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        if (document.querySelector("[data-testid=feedback]")) return null;
+        const button = document.querySelector(".pool .token");
+        if (!button) return null;
+        button.click();
+        const status = document.querySelector("[data-testid=order-status]");
+        if (button.classList.contains("is-reject")) {
+          return { text: status?.textContent || "", role: status?.getAttribute("role") || "" };
+        }
+        await wait(360);
+      }
+      return null;
+    });
+    assert.equal(miss?.text, "Not that word. Try another.");
+    assert.equal(miss?.role, "status");
+    await page.waitForFunction(() => document.querySelector("[data-testid=order-status]")?.textContent === "");
+    await page.goto(`http://127.0.0.1:${keyboardPort}/#/play/sample-banana-flashlight/order`, { waitUntil: "domcontentloaded" });
+    await page.getByTestId("check").waitFor();
     await page.keyboard.press("1");
     await page.waitForTimeout(400);
     await page.keyboard.press("Enter");
@@ -349,9 +369,13 @@ test("webkit first round mixes a short fade, and line order is still not section
       assert.equal(songText.includes("Tricky lines"), false);
       assert.match(await page.getByTestId("chapter-progress").innerText(), /0 of 4 rounds/);
       assert.match(await page.getByTestId("game-round").first().innerText(), /Fade/);
-      assert.match(await page.getByTestId("game-round").nth(1).innerText(), /Finish the previous round/);
+      assert.match(await page.getByTestId("game-round").nth(1).innerText(), /Locked/);
       assert.equal(await page.getByTestId("game-round").nth(1).isDisabled(), true);
       assert.equal(await page.getByTestId("game-concert").isDisabled(), true);
+      assert.equal(songText.match(/Finish the previous round/g)?.length || 0, 1);
+      assert.equal(await page.getByTestId("nav-home").evaluate((el) => el.classList.contains("is-on")), false);
+      const tabBar = await page.locator(".tabbar").evaluate((el) => getComputedStyle(el).backgroundColor);
+      assert.equal(tabBar, "rgba(11, 11, 15, 0.72)");
       assert.equal(await page.getByTestId("game-sections").count(), 0);
 
       await page.goto(`${base}/#/play/sample-banana-flashlight/lines`, { waitUntil: "domcontentloaded" });
@@ -370,6 +394,9 @@ test("webkit first round mixes a short fade, and line order is still not section
       await page.goto(`${base}/#/play/sample-banana-flashlight/round`, { waitUntil: "domcontentloaded" });
       await page.getByTestId("fade-advance").waitFor();
       assert.equal(await page.locator(".btn-primary").count(), 1);
+      assert.equal(await page.getByTestId("hearts").count(), 0);
+      assert.match(await page.getByTestId("score-pill").getAttribute("aria-label"), /^Score /);
+      const fadeBarBefore = await page.locator(".lesson-bar > span").evaluate((el) => parseFloat(el.style.width) || 0);
       const fadeBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
       const fadeBtn = await page.locator(".btn-primary").evaluate((el) => getComputedStyle(el).backgroundColor);
       assert.equal(fadeBg, "rgb(11, 11, 15)");
@@ -385,6 +412,10 @@ test("webkit first round mixes a short fade, and line order is still not section
       assert.match(await page.getByTestId("fade-line").innerText(), /found/);
       assert.equal(fadeText.includes(SAMPLE_SONG.lines[0]), false);
       assert.match(await page.getByTestId("fade-pass").innerText(), /Some words hidden/);
+      assert.match(await page.getByTestId("fade-advance").innerText(), /Reveal next word/);
+      assert.match(await page.getByTestId("question").innerText(), /say the missing words/i);
+      const fadeBarAfter = await page.locator(".lesson-bar > span").evaluate((el) => parseFloat(el.style.width) || 0);
+      assert.ok(fadeBarAfter > fadeBarBefore, `fade bar ${fadeBarBefore} -> ${fadeBarAfter}`);
       const hiddenBefore = await page.getByTestId("fade-blank").count();
       assert.ok(hiddenBefore > 0);
       await page.keyboard.press("1");
@@ -403,6 +434,8 @@ test("webkit first round mixes a short fade, and line order is still not section
       await page.goto(`${base}/#/play/sample-banana-flashlight/think`, { waitUntil: "domcontentloaded" });
       await page.getByTestId("think-show").waitFor();
       assert.equal(await page.locator(".btn-primary").count(), 1);
+      assert.equal(await page.getByTestId("hearts").count(), 0);
+      assert.match(await page.getByTestId("think-place").innerText(), /Verse · line 1 of \d+/);
       assert.equal((await page.locator("body").innerText()).includes(SAMPLE_SONG.lines[0]), false);
       await page.keyboard.press("Enter");
       await page.getByTestId("think-got").waitFor();
@@ -510,18 +543,8 @@ test("webkit lesson dock, hero contrast, and answer type hold on iPhone and Mac"
         return el.className;
       });
       assert.match(tapped, /is-accept|is-reject/);
-      const built = await page.locator("[data-testid=tray]").evaluate((tray) => {
-        const probe = document.createElement("span");
-        probe.className = "token is-set";
-        probe.textContent = "line";
-        tray.appendChild(probe);
-        const style = getComputedStyle(probe);
-        const result = { size: style.fontSize, weight: style.fontWeight };
-        probe.remove();
-        return result;
-      });
-      assert.equal(built.size, "22px");
-      assert.equal(built.weight, "700");
+      assert.equal(await page.locator("[data-testid=tray]").count(), 0);
+      assert.equal(await page.getByText("Your line appears here").count(), 0);
 
       await page.evaluate(() => {
         const spacer = document.createElement("div");

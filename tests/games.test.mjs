@@ -198,8 +198,10 @@ test("identical lines are interchangeable one tap at a time", () => {
 test("order taps flash a color and the shake is an animation reduced motion can drop", async () => {
   const css = await readFile(new URL("../css/app.css", import.meta.url), "utf8");
   assert.match(css, /\.token\.is-reject[\s\S]*#ff4d6d/i);
-  assert.match(css, /\.token\.is-accept[\s\S]*#34d399|var\(--good\)/);
+  assert.match(css, /\.token\.is-accept[\s\S]*#8b6fff/i);
+  assert.doesNotMatch(css, /#34d399|var\(--good\)/);
   assert.match(css, /@keyframes token-shake/);
+  assert.match(css, /prefers-reduced-motion:\s*no-preference[\s\S]*token-shake/);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
   assert.match(css, /animation:\s*none\s*!important/);
   assert.match(css, /@media \(hover: hover\) and \(pointer: fine\)/);
