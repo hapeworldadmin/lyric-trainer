@@ -25,9 +25,13 @@ import {
   singingMatch,
   studyFrame
 } from "./games.js?v=14";
-import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=9";
+import { editSummary } from "./identity.js?v=16";
+import { homeScreenCopy, requestPersistentStorage } from "./install.js?v=16";
+import { recognizeImage } from "./ocr.js?v=16";
+import { analyzePaste, choosePasteSource, cleanPastedPage, draftLyrics, searchLyricsUrl } from "./parse.js?v=16";
 import {
   addBonusXp,
+  applyLineEdit,
   buildExport,
   emptyProgress,
   finishStreak,
@@ -37,10 +41,9 @@ import {
   recordLineResult,
   recordRoundResult,
   recordRun,
-  resetLineMasteryIfChanged,
   retitleSongProgress,
   songStats
-} from "./progress.js?v=11";
+} from "./progress.js?v=16";
 import { SAMPLE_SONG } from "./sample.js?v=9";
 import { createScoreProvider, sanitizeRun } from "./scores.js?v=11";
 import { drawShareCard, shareText } from "./share.js?v=9";
@@ -52,9 +55,10 @@ import {
   sampleRecord,
   saveState,
   seedSample
-} from "./storage.js?v=11";
+} from "./storage.js?v=16";
 import { createLineRecognizer, speechRecognitionSupported } from "./speech.js?v=11";
-import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=11";
+import { completenessWarnings, mergeWithNext, prepareImportedText, presetFor, relabelBlock, SECTION_PRESETS, splitAtLine } from "./sections.js?v=16";
+import { clip, escapeHtml, normalizeAnswer, songKey, songsMatch, uid } from "./text.js?v=16";
 import { interpretHearing } from "./voice.js?v=11";
 import {
   applySharedProgress,
@@ -193,6 +197,7 @@ function armToast(message) {
 async function boot() {
   session.state = loadState();
   persist();
+  void requestPersistentStorage();
   try {
     const response = await fetch(new URL("../concerts.json", import.meta.url));
     if (!response.ok) throw new Error("missing");
@@ -447,8 +452,14 @@ function viewHome() {
       <p>No songs on this device yet.</p>
       <button class="btn btn-text" type="button" data-action="restore-sample">Restore the sample song</button>
     </div>`;
+  const install = session.state.settings?.installPrompted ? "" : `
+    <div class="banner" data-testid="install-prompt">
+      <p>${escapeHtml(homeScreenCopy())}</p>
+      <button class="btn btn-text" type="button" data-action="dismiss-install">OK</button>
+    </div>`;
   return `
     <section class="screen">
+      ${install}
       ${hero}
       ${upNext}
       <p class="kicker">Songs</p>
@@ -527,7 +538,6 @@ function viewPaste() {
   const back = form.fromConcert ? `#/concert/${encodeURIComponent(form.fromConcert)}` : "#/";
   const find = searchLyricsUrl(form.title, form.artist);
   const preview = form.preview;
-  const previewLines = preview ? preview.lines.slice(0, 3).map((line) => `<span>${escapeHtml(line)}</span>`).join("") : "";
   const metaFields = !known && (form.needMeta || (preview && !preview.detected)) ? `
     <label class="field">Title
       <input id="title" data-testid="title" type="text" maxlength="120" autocomplete="off" value="${escapeHtml(form.title || "")}">
@@ -535,15 +545,22 @@ function viewPaste() {
     <label class="field">Artist
       <input id="artist" data-testid="artist" type="text" maxlength="120" autocomplete="off" value="${escapeHtml(form.artist || "")}">
     </label>` : "";
+  const warnings = preview ? completenessWarnings(preview.lines, preview.sections) : [];
+  const warningHtml = warnings.length ? `<p class="hint" data-testid="paste-warning">${escapeHtml(warnings.join(" "))}</p>` : "";
   const body = preview ? `
     <p class="sub" data-testid="lyric-preview">${preview.lines.length} lines</p>
-    <div class="preview">${previewLines}</div>
+    ${warningHtml}
+    <div class="preview-edit" data-testid="section-preview">${previewEditorHtml(preview)}</div>
     ${metaFields}
     <button class="btn btn-primary" type="button" data-action="confirm-paste" data-testid="looks-right">Looks right</button>
     <button class="btn btn-text" type="button" data-action="retry-paste" data-testid="try-again">Try again</button>
   ` : `
     ${known ? `<a class="btn btn-secondary" id="find-lyrics" data-testid="find-lyrics" href="${escapeHtml(find)}" target="_blank" rel="noopener noreferrer">Find lyrics</a>` : ""}
-    <button class="btn btn-primary" type="button" data-action="paste-clipboard" data-testid="paste-clipboard">Paste</button>
+    <button class="btn btn-primary" type="button" data-action="paste-clipboard" data-testid="paste-clipboard">${known ? "Paste lyrics" : "Paste"}</button>
+    <button class="btn btn-text" type="button" data-action="pick-lyric-file" data-testid="import-file">Import .txt or .lrc</button>
+    <button class="btn btn-text" type="button" data-action="pick-scan" data-testid="scan-screenshot">Scan screenshot</button>
+    <input id="lyric-file" type="file" accept=".txt,.lrc,text/plain" hidden>
+    <input id="scan-file" type="file" accept="image/*" hidden>
     ${form.fallback ? `
       <label class="field">Lyrics
         <textarea id="lyrics" data-testid="lyrics" spellcheck="false" placeholder="Paste lyrics here.">${escapeHtml(form.raw || "")}</textarea>
@@ -563,10 +580,31 @@ function viewPaste() {
       <div class="stack">
         ${body}
         <p id="form-error" class="error" role="alert">${escapeHtml(form.error || "")}</p>
+        ${form.scanning ? `<p class="hint" data-testid="scan-status">Reading the image on this device.</p>` : ""}
         ${form.fallback && form.debug ? `<p class="fine" data-testid="paste-debug">${escapeHtml(form.debug)}</p>` : ""}
       </div>
     </section>
   `;
+}
+
+function previewEditorHtml(preview) {
+  return (preview.lines || []).map((line, index) => {
+    const label = preview.sections?.[index] || "Part";
+    const options = SECTION_PRESETS.map((preset) => {
+      const selected = presetFor(label).toLowerCase() === preset.toLowerCase() ? " selected" : "";
+      return `<option value="${escapeHtml(preset)}"${selected}>${escapeHtml(preset)}</option>`;
+    }).join("");
+    return `
+      <div class="preview-row">
+        <label class="preview-label">
+          <span class="sr-only">Section</span>
+          <select data-action="relabel-line" data-index="${index}" aria-label="Section for line ${index + 1}">${options}</select>
+        </label>
+        <span>${escapeHtml(line)}</span>
+        <button class="btn btn-text btn-small" type="button" data-action="merge-line" data-index="${index}">Merge</button>
+        <button class="btn btn-text btn-small" type="button" data-action="split-line" data-index="${index}">Split</button>
+      </div>`;
+  }).join("");
 }
 
 function pasteStatusHtml(parsed) {
@@ -1472,7 +1510,14 @@ function saveSong() {
   const packed = packLines(parsed);
   const title = clip(form.title, 120);
   const artist = clip(form.artist, 120);
-  const song = writeSong({ songId: form.songId, title, artist, lines: packed.lines, sections: packed.sections });
+  const song = writeSong({ songId: form.songId, title, artist, lines: packed.lines, sections: packed.sections, force: form.forceEdit });
+  if (song?.confirm) {
+    askEditConfirm(song.confirm, () => {
+      form.forceEdit = true;
+      saveSong();
+    });
+    return;
+  }
   if (song?.error) {
     form.error = song.error;
     showFormError(song.error);
@@ -1496,40 +1541,46 @@ function packLines(parsed) {
   return { lines, sections };
 }
 
-function writeSong({ songId, title, artist, lines, sections }) {
+function writeSong({ songId, title, artist, lines, sections, force = false }) {
   if (!normalizeAnswer(title) || !normalizeAnswer(artist)) return { error: "Add a title and an artist." };
   if (lines.length < 2) return { error: "Keep at least two lyric lines." };
   const state = session.state;
   const existing = state.songs.find((song) => songKey(song.title, song.artist) === songKey(title, artist));
-  if (songId) {
-    const song = findSong(songId);
-    if (!song) return { error: "That song is not on this device." };
-    if (existing && existing.id !== song.id) return { error: "Another saved song already uses that title and artist." };
-    const previousLines = [...song.lines];
-    const oldTitle = song.title;
-    const oldArtist = song.artist;
-    song.title = title;
-    song.artist = artist;
-    song.lines = lines;
-    song.sections = sections;
-    song.updatedAt = Date.now();
-    if (song.sample && (oldTitle !== title || oldArtist !== artist || previousLines.join("\n") !== lines.join("\n"))) song.sample = false;
+  const target = songId ? findSong(songId) : existing;
+  if (songId && !target) return { error: "That song is not on this device." };
+  if (songId && existing && existing.id !== target.id) return { error: "Another saved song already uses that title and artist." };
+  if (target) {
+    const before = { title, artist, lines: [...target.lines], sections: [...(target.sections || [])] };
+    const after = { title, artist, lines, sections };
+    const summary = editSummary(before, after);
+    if (summary.reset > 0 && !force) return { confirm: summary };
+    const oldTitle = target.title;
+    const oldArtist = target.artist;
+    target.title = title;
+    target.artist = artist;
+    target.lines = lines;
+    target.sections = sections;
+    target.updatedAt = Date.now();
+    if (target.sample && (oldTitle !== title || oldArtist !== artist || before.lines.join("\n") !== lines.join("\n"))) target.sample = false;
     retitleSongProgress(state.progress, oldTitle, oldArtist, title, artist);
-    resetLineMasteryIfChanged(state.progress, title, artist, previousLines, lines);
-    return song;
-  }
-  if (existing) {
-    const previousLines = [...existing.lines];
-    existing.lines = lines;
-    existing.sections = sections;
-    existing.updatedAt = Date.now();
-    if (existing.sample && previousLines.join("\n") !== lines.join("\n")) existing.sample = false;
-    resetLineMasteryIfChanged(state.progress, existing.title, existing.artist, previousLines, lines);
-    return existing;
+    applyLineEdit(state.progress, before, after);
+    return target;
   }
   const song = { id: uid(), title, artist, lines, sections, sample: false, createdAt: Date.now(), updatedAt: Date.now() };
   state.songs.push(song);
   return song;
+}
+
+function askEditConfirm(summary, again) {
+  session.modal = {
+    title: `${summary.kept} lines kept, ${summary.reset} reset`,
+    body: summary.lostSections.length
+      ? "A changed section loses Boss cleared and Learned."
+      : "Unchanged lines keep their progress.",
+    confirmLabel: "Save",
+    onConfirm() { again(); }
+  };
+  render();
 }
 
 function showPasteFallback(error) {
@@ -1597,7 +1648,14 @@ function confirmPaste() {
   const packed = packLines(form.preview);
   const title = clip(form.lockMeta ? form.title : (form.title || form.preview.title), 120);
   const artist = clip(form.lockMeta ? form.artist : (form.artist || form.preview.artist), 120);
-  const song = writeSong({ songId: null, title, artist, lines: packed.lines, sections: packed.sections });
+  const song = writeSong({ songId: null, title, artist, lines: packed.lines, sections: packed.sections, force: form.forceEdit });
+  if (song?.confirm) {
+    askEditConfirm(song.confirm, () => {
+      form.forceEdit = true;
+      confirmPaste();
+    });
+    return;
+  }
   if (song?.error) {
     form.error = song.error;
     form.needMeta = song.error.startsWith("Add a title");
@@ -2590,7 +2648,27 @@ function onClick(event) {
     captureForm();
     applyPastedText(session.form?.raw || "");
   } else if (action === "confirm-paste") confirmPaste();
-  else if (action === "retry-paste") {
+  else if (action === "merge-line") {
+    const index = Number(el.dataset.index);
+    if (session.form?.preview) {
+      session.form.preview.sections = mergeWithNext(session.form.preview.sections, index);
+      session.form.forceEdit = false;
+      render();
+    }
+  } else if (action === "split-line") {
+    const index = Number(el.dataset.index);
+    if (session.form?.preview) {
+      session.form.preview.sections = splitAtLine(session.form.preview.sections, index);
+      session.form.forceEdit = false;
+      render();
+    }
+  } else if (action === "pick-lyric-file") document.getElementById("lyric-file")?.click();
+  else if (action === "pick-scan") document.getElementById("scan-file")?.click();
+  else if (action === "dismiss-install") {
+    session.state.settings.installPrompted = true;
+    persist();
+    render();
+  } else if (action === "retry-paste") {
     if (!session.form) return;
     session.form.preview = null;
     session.form.error = "";
@@ -2871,6 +2949,56 @@ function onChange(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
     importFile(file);
+  }
+  if (event.target.id === "lyric-file") {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) void readLyricFile(file);
+  }
+  if (event.target.id === "scan-file") {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) void scanLyricImage(file);
+  }
+  if (event.target.dataset.action === "relabel-line" && session.form?.preview) {
+    const index = Number(event.target.dataset.index);
+    session.form.preview.sections = relabelBlock(session.form.preview.sections, index, event.target.value);
+    session.form.forceEdit = false;
+    render();
+  }
+}
+
+async function readLyricFile(file) {
+  try {
+    const text = await file.text();
+    applyPastedText(prepareImportedText(file.name, text));
+  } catch {
+    if (session.form) session.form.error = "Could not read that file.";
+    render();
+  }
+}
+
+async function scanLyricImage(file) {
+  const form = session.form;
+  if (!form) return;
+  form.scanning = true;
+  form.error = "";
+  render();
+  try {
+    const text = await recognizeImage(file);
+    if (session.form !== form) return;
+    form.scanning = false;
+    if (!String(text || "").trim()) {
+      form.error = "Could not read that image.";
+      render();
+      return;
+    }
+    applyPastedText(text);
+  } catch {
+    if (session.form !== form) return;
+    form.scanning = false;
+    form.error = "Could not read that image.";
+    render();
   }
 }
 

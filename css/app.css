@@ -362,7 +362,49 @@ textarea, input[type="text"] {
   font-weight: 500;
 }
 textarea { min-height: 160px; resize: vertical; line-height: 1.4; }
+.banner {
+  margin: 8px 0 16px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--surface);
+}
+.banner p { margin: 0 0 8px; }
 .preview { display: grid; gap: 8px; margin: 8px 0 16px; }
+.preview-edit {
+  display: grid;
+  gap: 8px;
+  max-height: 46dvh;
+  overflow: auto;
+  margin: 8px 0;
+}
+.preview-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.preview-row > span {
+  flex: 1 1 140px;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preview-row .btn { width: auto; min-height: 44px; }
+.preview-label select {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
 .preview span {
   font-size: 16px;
   font-weight: 600;

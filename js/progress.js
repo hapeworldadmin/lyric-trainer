@@ -1,4 +1,5 @@
-import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js?v=10";
+import { editSummary, identitiesForSong, isLineIdentity, remapRecallKeys } from "./identity.js?v=16";
+import { clip, lineKey, shiftDateKey, songKey, todayKey } from "./text.js?v=16";
 
 export const MASTER_CORRECT = 2;
 export const ROUND_MISTAKE_LIMIT = 1;
@@ -49,6 +50,8 @@ function ensureRow(progress, song) {
   row.lineStats ||= {};
   row.rounds ||= {};
   row.chapters ||= {};
+  row.recall ||= {};
+  row.sectionState ||= {};
   return row;
 }
 
@@ -174,10 +177,43 @@ export function retitleSongProgress(progressByPlayer, oldTitle, oldArtist, newTi
       prev.artist = newArtist;
       continue;
     }
+    const moved = { ...prev, title: newTitle, artist: newArtist, recall: remapRecallKeys(prev.recall, oldTitle, oldArtist, newTitle, newArtist) };
     const dest = progress.songs[newKey];
-    progress.songs[newKey] = dest ? mergeRows(dest, prev, newTitle, newArtist) : { ...prev, title: newTitle, artist: newArtist };
+    progress.songs[newKey] = dest ? mergeRows(dest, moved, newTitle, newArtist) : moved;
     delete progress.songs[oldKey];
   }
+}
+
+export function applyLineEdit(progressByPlayer, beforeSong, afterSong) {
+  const summary = editSummary(beforeSong, afterSong);
+  const key = songKey(afterSong.title, afterSong.artist);
+  const keep = new Set(summary.keptIds);
+  const afterIds = identitiesForSong(afterSong).filter((item) => !item.repeat);
+  const keptText = new Set();
+  for (const item of afterIds) {
+    if (keep.has(item.id)) keptText.add(lineKey(afterSong.lines[item.index]));
+  }
+  for (const progress of Object.values(progressByPlayer || {})) {
+    const row = progress?.songs?.[key];
+    if (!row) continue;
+    const recall = {};
+    for (const [id, stat] of Object.entries(row.recall || {})) {
+      if (keep.has(id)) recall[id] = stat;
+    }
+    row.recall = recall;
+    row.lineStats ||= {};
+    for (const id of Object.keys(row.lineStats)) {
+      if (!keptText.has(id)) delete row.lineStats[id];
+    }
+    row.sectionState ||= {};
+    for (const number of summary.lostSections) {
+      const slot = row.sectionState[String(number)];
+      if (!slot) continue;
+      slot.boss = false;
+      slot.learned = false;
+    }
+  }
+  return summary;
 }
 
 export function resetLineMasteryIfChanged(progressByPlayer, title, artist, previousLines, nextLines) {
@@ -218,8 +254,19 @@ function mergeRows(a, b, title, artist) {
     chapters: { ...(b.chapters || {}), ...(a.chapters || {}) },
     plays: (a.plays || 0) + (b.plays || 0),
     lastPlayedAt: [a.lastPlayedAt, b.lastPlayedAt].filter(Boolean).sort().at(-1) || null,
-    imported: a.imported || b.imported || null
+    imported: a.imported || b.imported || null,
+    recall: mergeRecall(a.recall, b.recall),
+    sectionState: { ...(b.sectionState || {}), ...(a.sectionState || {}) }
   };
+}
+
+function mergeRecall(left, right) {
+  const next = { ...(right || {}) };
+  for (const [id, stat] of Object.entries(left || {})) {
+    const other = next[id];
+    if (!other || (stat?.lastPass || 0) >= (other.lastPass || 0)) next[id] = stat;
+  }
+  return next;
 }
 
 export function buildExport(state) {
@@ -248,6 +295,10 @@ export function buildExport(state) {
         exported.linesMastered = songRow.imported.linesMastered;
         exported.lineCount = songRow.imported.lineCount;
       }
+      const recall = exportRecall(songRow.recall);
+      if (Object.keys(recall).length) exported.recall = recall;
+      const sectionState = exportSectionState(songRow.sectionState);
+      if (Object.keys(sectionState).length) exported.sectionState = sectionState;
       songs[key] = exported;
     }
     progress[playerId] = {
@@ -260,7 +311,7 @@ export function buildExport(state) {
     };
   }
   return {
-    version: 1,
+    version: 2,
     kind: "lyric-trainer-progress",
     exportedAt: new Date().toISOString(),
     note: "Scores only. This file intentionally contains no lyrics.",
@@ -286,7 +337,7 @@ function publicRun(entry) {
 }
 
 export function mergeImport(state, data) {
-  if (!data || data.kind !== "lyric-trainer-progress" || data.version !== 1) {
+  if (!data || data.kind !== "lyric-trainer-progress" || (data.version !== 1 && data.version !== 2)) {
     throw new Error("Choose a Know the Verse progress file.");
   }
   const importedPlayers = Array.isArray(data.players) ? data.players : [];
@@ -320,7 +371,9 @@ export function mergeImport(state, data) {
         lineStats: {},
         plays: 0,
         lastPlayedAt: null,
-        imported: null
+        imported: null,
+        recall: {},
+        sectionState: {}
       };
       prev.title = clip(row.title, 120);
       prev.artist = clip(row.artist, 120);
@@ -332,6 +385,8 @@ export function mergeImport(state, data) {
         if (!GAMES.has(game)) continue;
         prev.bestByGame[game] = Math.max(prev.bestByGame[game] || 0, Math.round(Number(value) || 0));
       }
+      prev.recall = mergeRecall(prev.recall, importRecall(row.recall));
+      prev.sectionState = { ...(prev.sectionState || {}), ...importSectionState(row.sectionState) };
       if (row.masteryPercent != null && row.linesMastered != null && row.lineCount != null) {
         prev.imported = {
           masteryPercent: clamp(row.masteryPercent, 0, 100),
@@ -383,4 +438,51 @@ function normalizeStreak(streak) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Math.round(Number(value) || 0)));
+}
+
+function exportRecall(recall) {
+  const next = {};
+  for (const [id, stat] of Object.entries(recall || {})) {
+    if (!isLineIdentity(id) || !stat || typeof stat !== "object") continue;
+    next[id] = {
+      level: clamp(stat.level, 0, 4),
+      due: Math.max(0, Math.round(Number(stat.due) || 0)),
+      misses: Math.max(0, Math.round(Number(stat.misses) || 0)),
+      lastPass: Math.max(0, Math.round(Number(stat.lastPass) || 0)),
+      ladder: clamp(stat.ladder, 0, 4),
+      learned: Boolean(stat.learned),
+      hardPass: Math.max(0, Math.round(Number(stat.hardPass) || 0))
+    };
+  }
+  return next;
+}
+
+function exportSectionState(sectionState) {
+  const next = {};
+  for (const [id, stat] of Object.entries(sectionState || {})) {
+    if (!/^\d{1,4}$/.test(id) || !stat || typeof stat !== "object") continue;
+    next[id] = {
+      boss: Boolean(stat.boss),
+      learned: Boolean(stat.learned),
+      runs: Math.max(0, Math.round(Number(stat.runs) || 0)),
+      warmed: Boolean(stat.warmed)
+    };
+  }
+  return next;
+}
+
+function importRecall(recall) {
+  const next = {};
+  if (!recall || typeof recall !== "object" || Array.isArray(recall)) return next;
+  for (const [id, stat] of Object.entries(recall)) {
+    if (!isLineIdentity(id) || !stat || typeof stat !== "object" || Array.isArray(stat)) continue;
+    if (Object.values(stat).some((value) => typeof value === "string")) continue;
+    next[id] = exportRecall({ [id]: stat })[id];
+  }
+  return next;
+}
+
+function importSectionState(sectionState) {
+  if (!sectionState || typeof sectionState !== "object" || Array.isArray(sectionState)) return {};
+  return exportSectionState(sectionState);
 }
